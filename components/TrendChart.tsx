@@ -17,7 +17,11 @@ import type { DailyPoint } from "@/lib/types";
 type Props = {
   points: DailyPoint[];
   deltas: Map<string, number | null>;
-  serviceLabel: string;
+  /**
+   * 차트가 지금 무엇을 보여주는지. 기본은 서비스명("Claude"), 표에서 키를 선택하면
+   * 그 키의 표시 이름("삼성전자-테스트")이 들어온다.
+   */
+  subjectLabel: string;
   bounds: [string, string];
 };
 
@@ -28,7 +32,7 @@ type Row = {
   spike: boolean;
 };
 
-export default function TrendChart({ points, deltas, serviceLabel, bounds }: Props) {
+export default function TrendChart({ points, deltas, subjectLabel, bounds }: Props) {
   const rows: Row[] = points.map((p) => {
     const delta = deltas.get(p.date) ?? null;
     return { date: p.date, cost: p.costUsd, delta, spike: isSpike(delta) };
@@ -39,7 +43,7 @@ export default function TrendChart({ points, deltas, serviceLabel, bounds }: Pro
   return (
     <section className="card p-4 sm:p-5">
       <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="text-sm font-semibold">{serviceLabel} 일별 비용 추이</h2>
+        <h2 className="text-sm font-semibold">{subjectLabel} 일별 비용 추이</h2>
         <p className="text-xs tabular" style={{ color: "var(--text-muted)" }}>
           {bounds[0]} ~ {bounds[1]}
         </p>

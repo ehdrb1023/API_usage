@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 세 API 를 모두 호출해 responses/ 에 저장한다.
+# 네 엔드포인트를 모두 호출해 responses/ 에 저장한다.
 # 하나가 실패해도 나머지는 계속 시도하고, 마지막에 요약을 출력한다.
 
 set -uo pipefail
@@ -20,9 +20,10 @@ run() {
   fi
 }
 
-run "Anthropic Usage" fetch_anthropic_usage.sh
-run "Anthropic Cost"  fetch_anthropic_cost.sh
-run "Vercel Billing"  fetch_vercel_usage.sh
+run "Anthropic Usage"    fetch_anthropic_usage.sh
+run "Anthropic Cost"     fetch_anthropic_cost.sh
+run "Anthropic API Keys" fetch_anthropic_api_keys.sh
+run "Vercel Billing"     fetch_vercel_usage.sh
 
 echo
 echo "=== 요약 ==="

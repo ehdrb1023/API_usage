@@ -225,8 +225,13 @@ export interface AnthropicCostResult {
    *    "123.45" === $1.2345.  100 으로 나누지 않으면 금액이 100배가 됩니다.
    *    `centsStringToUsd()` (lib/clients/anthropic.ts) 를 쓰세요.
    *
-   * ⚠️ 실제 응답으로 검증 필요 — 센트 단위라는 점은 문서 기준입니다.
-   *    첫 호출 뒤 Console 청구 화면 금액과 반드시 대조할 것.
+   * ✅ 2026-08-14 실제 응답으로 검증 — **센트가 맞습니다.** usage_report 의 토큰 수와
+   *    나눠 단가를 역산하면 /100 했을 때만 공시 단가와 정확히 일치합니다:
+   *      claude-haiku-4-5  uncached input  2,919,015 tok / "291.9015" → $1.00/MTok
+   *      claude-sonnet-5   uncached input  1,143,691 tok / "228.7382" → $2.00/MTok (인트로 단가)
+   *      claude-sonnet-5   cache read      1,913,996 tok / "38.2799"  → $0.20/MTok (입력가의 10%)
+   *      claude-opus-4-8   uncached input  2,268,678 tok / "1134.3390" → $5.00/MTok
+   *    /100 을 빼면 각각 $100·$200·$500/MTok 이 되어 존재하지 않는 단가가 됩니다.
    */
   amount: string;
   /** 현재 항상 "USD". */
@@ -266,6 +271,60 @@ export interface AnthropicCostReportParams {
   group_by?: AnthropicCostGroupBy[];
 }
 
+// ============================================================================
+// Anthropic — List API Keys
+// ============================================================================
+
+/**
+ * ✅ 2026-08-14 실제 응답으로 검증 — 31개 키 중 active 28 / archived 3.
+ * `inactive` 는 문서에만 있고 이번 조직에는 없었습니다(값 자체는 유효).
+ */
+export type AnthropicApiKeyStatus = "active" | "inactive" | "archived";
+
+export interface AnthropicApiKey {
+  id: string;
+  type: "api_key";
+  /** 콘솔에서 붙인 이름. 조직 안에서 **유일하지 않습니다** (같은 이름의 키가 여럿 존재). */
+  name: string;
+  /** 기본 워크스페이스는 null. */
+  workspace_id: string | null;
+  created_at: string;
+  created_by: { id: string; type: string };
+  /** 예: "sk-ant-api03-hqL...kQAA". 이름이 겹칠 때 사람이 구분하는 용도. */
+  partial_key_hint: string | null;
+  /** 새 값이 추가될 수 있어 열어 둡니다. */
+  status: AnthropicApiKeyStatus | (string & {});
+
+  /**
+   * ✅ 2026-08-14 실측 — 문서 스키마 예시에는 없지만 실제로 내려옵니다.
+   * 만료 설정이 없으면 null.
+   */
+  expires_at?: string | null;
+  principal?: unknown;
+}
+
+/**
+ * ⚠️ usage/cost 리포트와 **페이지네이션 방식이 다릅니다.**
+ * 리포트는 `page`/`next_page` 커서, 이쪽은 `after_id`/`before_id` + `last_id` 입니다.
+ */
+export interface AnthropicApiKeysResponse {
+  data: AnthropicApiKey[];
+  has_more: boolean;
+  first_id: string | null;
+  last_id: string | null;
+}
+
+export interface AnthropicListApiKeysParams {
+  /** 기본 20 / 최대 1000. */
+  limit?: number;
+  /** 이 id **다음** 페이지부터. 직전 응답의 `last_id` 를 넘깁니다. */
+  after_id?: string;
+  before_id?: string;
+  status?: AnthropicApiKeyStatus;
+  workspace_id?: string;
+  created_by_user_id?: string;
+}
+
 /** Anthropic 표준 에러 봉투. */
 export interface AnthropicErrorResponse {
   type: "error";
@@ -293,33 +352,37 @@ export type VercelPricingCategory =
   | "Dynamic"
   | "Other";
 
+/**
+ * ✅ 2026-08-14 실제 응답으로 검증 — **FOCUS 표준 enum 이 아니라 Vercel 자체 분류**였습니다.
+ *    문서의 "AI and Machine Learning" / "Compute" / "Storage" 같은 값은 하나도 오지 않고,
+ *    아래 15종이 옵니다. 8,708건 중 8건은 이 필드가 아예 없습니다(구독 항목).
+ *    새 값이 추가될 수 있으므로 `(string & {})` 로 열어 둡니다.
+ */
 export type VercelServiceCategory =
-  | "AI and Machine Learning"
-  | "Analytics"
-  | "Business Applications"
-  | "Compute"
-  | "Databases"
-  | "Developer Tools"
-  | "Identity"
-  | "Integration"
-  | "Internet of Things"
-  | "Management and Governance"
-  | "Media"
-  | "Migration"
-  | "Mobile"
-  | "Multicloud"
-  | "Networking"
-  | "Other"
-  | "Security"
-  | "Storage"
-  | "Web";
+  | "AI Tokens"
+  | "Build & Deploy"
+  | "Content, Caching & Optimization"
+  | "Flat Rate Hidden"
+  | "KMS"
+  | "Observability"
+  | "Queues"
+  | "Sandbox"
+  | "Services"
+  | "Subscription Licenses"
+  | "VCR"
+  | "Vercel Connect"
+  | "Vercel Delivery Network"
+  | "Vercel Functions"
+  | "Web Application Firewall"
+  | (string & {});
 
 /**
  * FOCUS 스펙상 `Tags` 는 `additionalProperties: string` 인 자유 형식 맵이고,
  * 문서 설명에 "Vercel ProjectId / ProjectName 정보를 담는다" 고만 적혀 있습니다.
  *
- * ⚠️ 실제 응답으로 검증 필요 — 키 이름이 정확히 `ProjectId` / `ProjectName` 인지,
- *    그리고 항상 존재하는지(팀·플랜에 따라 빠질 수 있음)를 확인할 것.
+ * ✅ 2026-08-14 실제 응답으로 검증 — 키 이름은 `ProjectId` / `ProjectName` 이 맞습니다.
+ *    다만 **항상 오지는 않습니다**: 8,708건 중 2,108건(24%)은 `Tags` 가 `{}` 였고,
+ *    이 몫이 프로젝트별 집계에서 "(프로젝트 미지정)" 으로 잡혀 비용 1위였습니다.
  *    프로젝트별 비용 집계는 최상위 필드가 아니라 이 중첩 경로를 씁니다.
  */
 export interface VercelChargeTags {
@@ -352,14 +415,19 @@ export interface VercelFocusCharge {
   /**
    * 소비량. 측정 가능한 소비가 없는 charge 는 null.
    *
-   * ⚠️ `PricingQuantity` 와 **단위가 다릅니다** (예: 250,000 requests vs
-   *    0.25 million requests). 사용량 그래프는 어느 쪽으로 통일할지 먼저 정할 것.
+   * ✅ 2026-08-14 검증 — `PricingQuantity` 와 단위가 다른 정도가 아니라 **성격이 다릅니다**.
+   *    `PricingUnit` 이 전부 `"USD"` 로 오고 `PricingQuantity` 는 금액(대부분 0)이었습니다.
+   *    사용량은 `ConsumedQuantity` + `ConsumedUnit` 만 보면 됩니다.
+   *    정수가 아닐 수 있습니다 (예: Edge Requests 4940.98 Requests — 일 경계 안분).
    */
   ConsumedQuantity: number | null;
   /**
-   * ⚠️ 실제 응답으로 검증 필요 — 실제로 오는 단위 문자열 목록(build-minutes,
-   *    invocations, GB-hours …)이 문서에 열거되어 있지 않습니다. 값 목록을 수집해
-   *    docs/api-response-notes.md 에 적어 둘 것.
+   * ✅ 2026-08-14 실제 응답으로 검증 — 실제로 오는 값은 21종입니다:
+   *    minute / hour / gigabyte / gigabyte-hour / gigabyte-month /
+   *    Invocations / Requests / Execution Units / Reads / Writes / Operations /
+   *    Units / Transformations / Creations / Events / Data Points / Traces /
+   *    Projects / Seats / Credits, 그리고 구독 항목은 null.
+   *    지표 매핑은 lib/adapters/vercel.ts 의 UNIT_TO_METRIC 참고.
    */
   ConsumedUnit: string | null;
 

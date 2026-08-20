@@ -16,9 +16,12 @@
 import {
   ApiClientError,
   MissingCredentialError,
+  type AnthropicApiKey,
+  type AnthropicApiKeysResponse,
   type AnthropicCostBucket,
   type AnthropicCostReportParams,
   type AnthropicCostReportResponse,
+  type AnthropicListApiKeysParams,
   type AnthropicUsageBucket,
   type AnthropicUsageReportParams,
   type AnthropicUsageReportResponse,
@@ -28,6 +31,7 @@ import {
 export const ANTHROPIC_USAGE_REPORT_PATH =
   "/v1/organizations/usage_report/messages";
 export const ANTHROPIC_COST_REPORT_PATH = "/v1/organizations/cost_report";
+export const ANTHROPIC_API_KEYS_PATH = "/v1/organizations/api_keys";
 
 export const DEFAULT_ANTHROPIC_API_BASE = "https://api.anthropic.com";
 export const DEFAULT_ANTHROPIC_API_VERSION = "2023-06-01";
@@ -125,11 +129,9 @@ function buildHeaders(config: ResolvedAnthropicConfig): Record<string, string> {
 /**
  * 쿼리스트링 조립.
  *
- * ⚠️ 실제 응답으로 검증 필요 — 배열 파라미터를 `group_by[]=model` 처럼 대괄호 접미사로
- *    보냅니다. 공식 문서는 파라미터 이름을 `group_by` 로 적고 있고 curl 예시에는
- *    배열 사용례가 없어서, 대괄호 없는 형태만 받는지 여부가 확인되지 않았습니다.
- *    (repo 의 scripts/fetch_anthropic_*.sh 도 대괄호 형태를 씁니다.)
- *    첫 호출에서 group_by 가 먹지 않으면 여기 `[]` 를 떼고 다시 시도할 것.
+ * ✅ 2026-08-14 실제 응답으로 검증 — 대괄호 접미사(`group_by[]=model`) 형태가 정상 동작합니다.
+ *    usage_report 185행 전부 `model` / `api_key_id` 가 채워져 왔고, cost_report 415행도
+ *    `description` 이 채워져 왔습니다. `[]` 를 뗄 필요 없습니다.
  */
 function buildQuery(params: Record<string, unknown>): URLSearchParams {
   const query = new URLSearchParams();
@@ -278,6 +280,65 @@ export async function fetchAllAnthropicCostBuckets(
     ANTHROPIC_COST_REPORT_PATH,
     { ...params },
     config,
+  );
+}
+
+// ---------------------------------------------------------------- API 키 목록
+
+/** api_keys 는 기본 20건이라 그대로 두면 조용히 잘립니다. 페이지당 최대치 근처로 올려 둡니다. */
+const API_KEYS_PAGE_LIMIT = 100;
+
+/**
+ * GET /v1/organizations/api_keys — 한 페이지.
+ *
+ * ⚠️ 리포트 두 개와 **페이지네이션 방식이 다릅니다.** `page`/`next_page` 커서가 아니라
+ *    `after_id` + `last_id` 입니다. 전체가 필요하면 `fetchAllAnthropicApiKeys()` 를 쓰세요.
+ */
+export async function fetchAnthropicApiKeys(
+  params: AnthropicListApiKeysParams = {},
+  options: AnthropicClientOptions = {},
+): Promise<AnthropicApiKeysResponse> {
+  const config = resolveAnthropicConfig(options);
+  return getJson<AnthropicApiKeysResponse>(
+    ANTHROPIC_API_KEYS_PATH,
+    { ...params },
+    config,
+  );
+}
+
+/**
+ * api_keys 를 `after_id` 로 끝까지 넘겨 전체 목록을 만듭니다.
+ *
+ * `status` 를 넘기지 않으면 **archived/inactive 키까지 전부** 옵니다. 과거 사용량에는
+ * 지금 비활성인 키도 등장하므로, 이름 매핑 용도라면 필터를 걸지 마세요.
+ */
+export async function fetchAllAnthropicApiKeys(
+  params: AnthropicListApiKeysParams = {},
+  options: AnthropicClientOptions = {},
+): Promise<AnthropicApiKey[]> {
+  const config = resolveAnthropicConfig(options);
+  const keys: AnthropicApiKey[] = [];
+  let afterId: string | undefined = params.after_id;
+
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const body: AnthropicApiKeysResponse = await getJson<AnthropicApiKeysResponse>(
+      ANTHROPIC_API_KEYS_PATH,
+      { limit: API_KEYS_PAGE_LIMIT, ...params, after_id: afterId },
+      config,
+    );
+
+    const page = body.data ?? [];
+    keys.push(...page);
+
+    // last_id 가 비면 마지막 항목 id 로 대신한다. 둘 다 없으면 여기서 끊어야
+    // 같은 페이지를 무한히 다시 받는 일이 없다.
+    const nextAfter = body.last_id ?? page[page.length - 1]?.id;
+    if (!body.has_more || !nextAfter) return keys;
+    afterId = nextAfter;
+  }
+
+  throw new Error(
+    `Anthropic ${ANTHROPIC_API_KEYS_PATH}: 페이지가 ${MAX_PAGES}개를 넘었습니다.`,
   );
 }
 

@@ -304,6 +304,65 @@ describe("HTTP 에러", () => {
       },
     );
   });
+
+  // 2026-08-14 실측: 청구 데이터가 아직 없는 구간을 조회하면 빈 배열이 아니라
+  // 404 costs_not_found 가 온다. 진짜 에러가 아니므로 빈 배열로 바꿔 돌려준다.
+  it("404 costs_not_found 는 던지지 않고 빈 배열을 돌려준다", async () => {
+    const { fetchImpl } = mockFetch([
+      new Response(
+        JSON.stringify({ error: { code: "costs_not_found", message: "Costs not found" } }),
+        { status: 404 },
+      ),
+    ]);
+
+    const charges = await fetchVercelBillingCharges(RANGE, { ...TOKEN, fetch: fetchImpl });
+    assert.deepEqual(charges, []);
+  });
+
+  it("costs_not_found 가 아닌 404 는 그대로 던진다", async () => {
+    const { fetchImpl } = mockFetch([
+      new Response(JSON.stringify({ error: { code: "not_found" } }), { status: 404 }),
+    ]);
+
+    await assert.rejects(
+      () => fetchVercelBillingCharges(RANGE, { ...TOKEN, fetch: fetchImpl }),
+      (error: unknown) => {
+        assert.ok(error instanceof ApiClientError);
+        assert.equal(error.status, 404);
+        return true;
+      },
+    );
+  });
+
+  it("본문이 JSON 이 아닌 404 도 그대로 던진다 (조용히 삼키지 않는다)", async () => {
+    const { fetchImpl } = mockFetch([new Response("<html>Not Found</html>", { status: 404 })]);
+
+    await assert.rejects(
+      () => fetchVercelBillingCharges(RANGE, { ...TOKEN, fetch: fetchImpl }),
+      (error: unknown) => {
+        assert.ok(error instanceof ApiClientError);
+        assert.equal(error.status, 404);
+        return true;
+      },
+    );
+  });
+
+  it("403 은 계속 던진다 — 잘못된 teamId·토큰은 404 가 아니라 403 으로 온다", async () => {
+    const { fetchImpl } = mockFetch([
+      new Response(JSON.stringify({ error: { code: "forbidden", message: "Not authorized" } }), {
+        status: 403,
+      }),
+    ]);
+
+    await assert.rejects(
+      () => fetchVercelBillingCharges(RANGE, { ...TOKEN, fetch: fetchImpl }),
+      (error: unknown) => {
+        assert.ok(error instanceof ApiClientError);
+        assert.equal(error.status, 403);
+        return true;
+      },
+    );
+  });
 });
 
 // ---------------------------------------------------------------- 집계 유틸

@@ -10,11 +10,14 @@ import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
 
 import {
+  ANTHROPIC_API_KEYS_PATH,
   ANTHROPIC_COST_REPORT_PATH,
   ANTHROPIC_USAGE_REPORT_PATH,
   centsStringToUsd,
+  fetchAllAnthropicApiKeys,
   fetchAllAnthropicCostBuckets,
   fetchAllAnthropicUsageBuckets,
+  fetchAnthropicApiKeys,
   fetchAnthropicCostReport,
   fetchAnthropicUsageReport,
   resolveAnthropicConfig,
@@ -22,6 +25,8 @@ import {
 } from "../anthropic";
 import { ApiClientError, MissingCredentialError } from "../types";
 import type {
+  AnthropicApiKey,
+  AnthropicApiKeysResponse,
   AnthropicCostReportResponse,
   AnthropicUsageReportResponse,
 } from "../types";
@@ -453,6 +458,113 @@ describe("커서 페이지네이션", () => {
 
     assert.equal(calls[1].url.searchParams.get("page"), "page_COST_2");
     assert.equal(buckets.length, 2);
+  });
+});
+
+// ---------------------------------------------------------- API 키 목록
+
+/** 공식 문서 예시 + 2026-08-14 실제 응답에서 확인한 필드(`expires_at`)까지. */
+function apiKey(id: string, over: Partial<AnthropicApiKey> = {}): AnthropicApiKey {
+  return {
+    id,
+    type: "api_key",
+    name: `key-${id}`,
+    workspace_id: "wrkspc_017XPrKRNxvnSDdfD9mjjX5z",
+    created_at: "2026-08-13T04:02:05.130513Z",
+    created_by: { id: "user_01B7UqhcEuhRunqfPkPZtLZu", type: "user" },
+    partial_key_hint: "sk-ant-api03-hqL...kQAA",
+    status: "active",
+    expires_at: null,
+    ...over,
+  };
+}
+
+function apiKeysPage(
+  keys: AnthropicApiKey[],
+  hasMore = false,
+): AnthropicApiKeysResponse {
+  return {
+    data: keys,
+    has_more: hasMore,
+    first_id: keys[0]?.id ?? null,
+    last_id: keys[keys.length - 1]?.id ?? null,
+  };
+}
+
+describe("List API Keys", () => {
+  it("경로와 인증 헤더가 리포트와 같다", async () => {
+    const { fetchImpl, calls } = mockFetch([json(apiKeysPage([apiKey("apikey_1")]))]);
+
+    const body = await fetchAnthropicApiKeys({}, { ...KEY, fetch: fetchImpl });
+
+    assert.equal(calls[0].url.pathname, ANTHROPIC_API_KEYS_PATH);
+    assert.equal(calls[0].headers["x-api-key"], KEY.adminKey);
+    assert.equal(calls[0].headers["anthropic-version"], "2023-06-01");
+    assert.equal(body.data[0].id, "apikey_1");
+  });
+
+  it("after_id 로 다음 페이지를 이어 받아 전체를 합친다 (page/next_page 아님)", async () => {
+    const page1 = apiKeysPage([apiKey("apikey_1"), apiKey("apikey_2")], true);
+    const page2 = apiKeysPage([apiKey("apikey_3")]);
+    const { fetchImpl, calls } = mockFetch([json(page1), json(page2)]);
+
+    const keys = await fetchAllAnthropicApiKeys({}, { ...KEY, fetch: fetchImpl });
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].url.searchParams.get("after_id"), null);
+    assert.equal(calls[1].url.searchParams.get("after_id"), "apikey_2");
+    // 기본 20건에 조용히 잘리지 않도록 limit 을 올려서 보내는지.
+    assert.equal(calls[0].url.searchParams.get("limit"), "100");
+    assert.deepEqual(
+      keys.map((k) => k.id),
+      ["apikey_1", "apikey_2", "apikey_3"],
+    );
+  });
+
+  it("status 를 안 주면 필터를 보내지 않는다 (archived 키도 받아야 한다)", async () => {
+    const { fetchImpl, calls } = mockFetch([json(apiKeysPage([apiKey("apikey_1")]))]);
+
+    await fetchAllAnthropicApiKeys({}, { ...KEY, fetch: fetchImpl });
+
+    assert.equal(calls[0].url.searchParams.get("status"), null);
+  });
+
+  it("last_id 가 비어도 마지막 항목 id 로 이어 받는다", async () => {
+    const page1 = { ...apiKeysPage([apiKey("apikey_1")], true), last_id: null };
+    const { fetchImpl, calls } = mockFetch([
+      json(page1),
+      json(apiKeysPage([apiKey("apikey_2")])),
+    ]);
+
+    const keys = await fetchAllAnthropicApiKeys({}, { ...KEY, fetch: fetchImpl });
+
+    assert.equal(calls[1].url.searchParams.get("after_id"), "apikey_1");
+    assert.equal(keys.length, 2);
+  });
+
+  it("has_more=true 인데 커서를 만들 수 없으면 무한루프 없이 멈춘다", async () => {
+    const broken: AnthropicApiKeysResponse = {
+      data: [],
+      has_more: true,
+      first_id: null,
+      last_id: null,
+    };
+    const { fetchImpl, calls } = mockFetch([json(broken)]);
+
+    const keys = await fetchAllAnthropicApiKeys({}, { ...KEY, fetch: fetchImpl });
+
+    assert.equal(calls.length, 1);
+    assert.equal(keys.length, 0);
+  });
+
+  it("키가 없으면 네트워크를 타지 않고 던진다", async () => {
+    const { fetchImpl, calls } = mockFetch([]);
+
+    await assert.rejects(
+      () => fetchAllAnthropicApiKeys({}, { fetch: fetchImpl }),
+      MissingCredentialError,
+    );
+    assert.equal(calls.length, 0);
   });
 });
 

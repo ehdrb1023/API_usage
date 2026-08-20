@@ -33,8 +33,13 @@ mock/                      목업 데이터 (실제 API 스키마와 동일한 �
   anthropic-usage.json       usage_report + cost_report
   vercel-usage.json          FOCUS v1.3 billing charges
 
+config/
+  client-keys.json         ★ 서비스별 표 표시 이름 (api_key_id → 이름). 팀이 직접 관리
+  README.md                  ↑ 작성법·우선순위·api_key_id 확인 방법
+
 lib/
   data-source.ts           ★ 목업/실API 스위치 — 교체 지점은 여기 하나
+  client-keys.ts           config/client-keys.json 로더 (벤더 클라이언트 아님)
   adapters/anthropic.ts    Anthropic 응답 → 정규화 모델
   adapters/vercel.ts       Vercel 응답    → 정규화 모델
   analytics.ts             기간 슬라이스, MoM, 급증일 판정
@@ -46,6 +51,18 @@ scripts/gen_mock.py        목업 재생성 (시드 고정, 결정적)
 scripts/fetch_*.sh         실제 API 응답을 responses/ 에 떠보는 CLI
 docs/api-response-notes.md 두 API 의 실제 응답 구조 정리
 ```
+
+## 화면에서 할 수 있는 것
+
+- **탭** — Claude / Vercel. **기간** — 7일 / 30일 / 이번 달.
+- **서비스별 사용량 표의 행을 클릭**하면 위쪽 카드·차트·일별 상세가 그 API 키
+  하나만의 수치로 바뀐다. 급증일(전일 대비 +20%)도 그 키 기준으로 다시 계산된다 —
+  전체 합계로는 안 보이던 급증이 특정 거래처에서만 잡히는 경우가 있다.
+  같은 행을 다시 누르거나 **"전체 보기로 돌아가기"** 를 누르면 해제된다.
+  이때 **API 를 다시 부르지 않는다** — `usage_report` 를 이미 `group_by[]=api_key_id`
+  로 받아 뒀으므로 메모리에 있는 데이터를 거르기만 한다 (`filterSeriesByAltKey`).
+- 모델별·서비스별 두 표는 키를 선택해도 **전체 기준**을 유지한다. 키×모델 교차표는
+  만들지 않기 때문이다 (선택 중에는 화면에 그렇게 적힌다).
 
 ## 데이터에서 주의할 점
 

@@ -1,4 +1,9 @@
-import type { DailyPoint, RangeId, ServiceSeries } from "@/lib/types";
+import type {
+  BreakdownItem,
+  DailyPoint,
+  RangeId,
+  ServiceSeries,
+} from "@/lib/types";
 
 /** 전일 대비 이만큼 이상 오르면 빨간색으로 강조한다. */
 export const SPIKE_THRESHOLD = 0.2;
@@ -53,6 +58,54 @@ export function computeDeltas(points: DailyPoint[]): Map<string, number | null> 
 
 export function isSpike(delta: number | null | undefined): boolean {
   return delta != null && delta >= SPIKE_THRESHOLD;
+}
+
+/**
+ * 보조 축의 항목(= API 키) 하나만 남긴 시계열.
+ *
+ * **새 API 호출이 없다.** `usage_report` 를 이미 `group_by[]=api_key_id` 로 받아 뒀고
+ * 어댑터가 그걸 날짜별 `altItems` 로 펼쳐 뒀으므로, 여기서는 해당 키의 행만 꺼내면 된다.
+ *
+ * ⚠️ 반환값은 **KPI·차트·일별 상세 전용**이다. 모델별 축(`items`)은 키별로 쪼갤 수 없어서
+ *    (어댑터가 키×모델 교차표를 만들지 않는다) 그 키 한 줄만 담아 둔다.
+ *    모델별·서비스별 표에는 원본 시리즈를 그대로 써야 한다.
+ */
+export function filterSeriesByAltKey(
+  series: ServiceSeries,
+  altKey: string,
+): ServiceSeries {
+  const points: DailyPoint[] = series.points.map((p) => {
+    const item = p.altItems?.find((i) => i.key === altKey);
+
+    // 그 키를 안 쓴 날도 0 으로 남긴다. 날짜를 건너뛰면 전일 대비(급증일) 계산이 어긋난다.
+    const metrics: Record<string, number> = {};
+    for (const k of Object.keys(p.metrics)) metrics[k] = item?.metrics[k] ?? 0;
+
+    return {
+      date: p.date,
+      costUsd: item?.costUsd ?? 0,
+      metrics,
+      items: item ? [item] : [],
+      altItems: item ? [item] : [],
+    };
+  });
+
+  return { ...series, points };
+}
+
+/**
+ * 보조 축 항목의 표시 이름을 전체 구간에서 찾는다.
+ * 선택한 키가 지금 기간에는 사용량이 없어 표에 안 보여도 제목은 떠야 하므로 필요하다.
+ */
+export function findAltItemLabel(
+  series: ServiceSeries,
+  altKey: string,
+): string | undefined {
+  for (const p of series.points) {
+    const item = p.altItems?.find((i) => i.key === altKey);
+    if (item) return item.label;
+  }
+  return undefined;
 }
 
 export type Kpis = {
@@ -129,21 +182,42 @@ export type BreakdownRow = {
   costUsd: number;
   costShare: number;
   metrics: Record<string, number>;
+  hint?: string;
+  badge?: string;
+  title?: string;
 };
 
-/** 선택 구간의 모델별 / 프로젝트별 합계. */
+/** `computeBreakdown` 이 어느 축을 집계할지 고르는 셀렉터. */
+export const BREAKDOWN_AXES = {
+  /** 기본 축 — Claude 는 모델별, Vercel 은 프로젝트별. */
+  primary: (p: DailyPoint) => p.items,
+  /** 보조 축 — Claude 의 API 키(거래처 서비스)별. 없는 서비스는 빈 배열. */
+  alt: (p: DailyPoint) => p.altItems ?? [],
+} as const;
+
+/** 선택 구간의 축별 합계. */
 export function computeBreakdown(
   series: ServiceSeries,
   range: RangeId,
+  pick: (point: DailyPoint) => BreakdownItem[] = BREAKDOWN_AXES.primary,
 ): BreakdownRow[] {
   const acc = new Map<string, BreakdownRow>();
   let total = 0;
 
   for (const p of sliceRange(series.points, range)) {
-    for (const item of p.items) {
+    for (const item of pick(p)) {
       let row = acc.get(item.key);
       if (!row) {
-        row = { key: item.key, label: item.label, costUsd: 0, costShare: 0, metrics: {} };
+        row = {
+          key: item.key,
+          label: item.label,
+          costUsd: 0,
+          costShare: 0,
+          metrics: {},
+          hint: item.hint,
+          badge: item.badge,
+          title: item.title,
+        };
         acc.set(item.key, row);
       }
       row.costUsd += item.costUsd;

@@ -118,6 +118,26 @@ function assertValidRange(from: string, to: string): void {
   }
 }
 
+/**
+ * "조회 구간에 청구 데이터가 아직 없음" 을 뜻하는 404 인지 판별한다.
+ *
+ * 2026-08-14 실측: 데이터가 존재하지 않는 구간을 조회하면 빈 배열이 아니라
+ *   HTTP 404 `{"error":{"code":"costs_not_found","message":"Costs not found"}}`
+ * 가 온다. 이건 에러가 아니라 "그 기간엔 아무 일도 없었다" 는 뜻이므로 빈 배열로 돌린다.
+ *
+ * 상태 코드만 보지 않고 **`error.code` 까지 확인**한다. 잘못된 teamId·토큰은
+ * 404 가 아니라 403 `forbidden` 으로 오는 것을 확인했지만(그래서 여기 걸리지 않는다),
+ * 앞으로 다른 이유의 404 가 생겼을 때 그것까지 조용히 삼키지 않기 위해서다.
+ */
+function isCostsNotFound(status: number, body: string): boolean {
+  if (status !== 404) return false;
+  try {
+    return (JSON.parse(body) as { error?: { code?: string } }).error?.code === "costs_not_found";
+  } catch {
+    return false;
+  }
+}
+
 function hintForStatus(status: number): string | undefined {
   if (status === 401) {
     return "토큰이 유효하지 않거나 만료됐습니다. Vercel Dashboard → Account Settings → Tokens 에서 재발급하세요.";
@@ -130,7 +150,11 @@ function hintForStatus(status: number): string | undefined {
     );
   }
   if (status === 404) {
-    return "teamId 또는 slug 가 잘못됐을 수 있습니다.";
+    return (
+      "조회 구간에 데이터가 없다는 404(`costs_not_found`)는 위에서 빈 배열로 처리하므로, " +
+      "여기까지 온 404 는 다른 원인입니다. 경로나 API 버전을 확인하세요. " +
+      "(잘못된 teamId·토큰은 404 가 아니라 403 으로 옵니다)"
+    );
   }
   if (status === 400) {
     return "from/to 형식(ISO 8601 UTC)이나 조회 범위(최대 1년)를 확인하세요.";
@@ -176,6 +200,10 @@ export function parseFocusChargesJsonl(text: string): VercelFocusCharge[] {
  *    "실제 청구 총액"을 보려면 전부 더해야 합니다. 두 숫자는 다릅니다.
  *
  * ⚠️ 무료 Hobby 플랜은 청구 항목이 없어 빈 배열이 정상입니다 (에러가 아님).
+ *
+ * ⚠️ 빈 배열이 나오는 경우가 하나 더 있습니다 — 조회 구간에 청구 데이터가 아직
+ *    존재하지 않으면 API 가 404 `costs_not_found` 를 주는데, 이건 에러가 아니므로
+ *    여기서 빈 배열로 바꿔 돌려줍니다 (`isCostsNotFound`). 그 외 404 는 그대로 던집니다.
  */
 export async function fetchVercelBillingCharges(
   params: VercelBillingChargesParams,
@@ -203,10 +231,15 @@ export async function fetchVercelBillingCharges(
   });
 
   if (!response.ok) {
+    const body = await response.text().catch(() => "<본문 읽기 실패>");
+
+    // 데이터가 아직 없는 구간 → 에러가 아니라 빈 결과.
+    if (isCostsNotFound(response.status, body)) return [];
+
     throw new ApiClientError({
       vendor: "vercel",
       status: response.status,
-      body: await response.text().catch(() => "<본문 읽기 실패>"),
+      body,
       url: url.toString(),
       hint: hintForStatus(response.status),
     });
