@@ -1,7 +1,11 @@
 import Dashboard from "@/components/Dashboard";
 import { getAllSeries, getDataSourceMode } from "@/lib/data-source";
 
-// 목업은 파일을 읽고 실 API 는 매번 새로 부른다. 캐시하지 않는다.
+/**
+ * 페이지 자체는 매 요청 새로 그린다 — config/client-keys.json 수정이 바로 보여야 하고,
+ * 렌더는 어차피 싸다. 무거운 벤더 API 호출만 lib/data-source.ts 에서 하루 단위로
+ * 캐싱한다 (UTC 날짜 기준).
+ */
 export const dynamic = "force-dynamic";
 
 export default async function Page() {

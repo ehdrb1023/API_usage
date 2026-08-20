@@ -1,6 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import { unstable_cache } from "next/cache";
+
 import {
   ANTHROPIC_METRICS,
   ANTHROPIC_PRIMARY_METRIC,
@@ -91,7 +93,7 @@ async function getClaude(mode: DataSourceMode): Promise<ServiceSeries> {
   const [raw, clientKeyNames] = await Promise.all([
     mode === "mock"
       ? readMock<AnthropicRaw>("anthropic-usage.json")
-      : fetchAnthropic(),
+      : fetchAnthropicCached(utcDay()),
     loadClientKeyNames(),
   ]);
 
@@ -184,7 +186,7 @@ async function getVercel(mode: DataSourceMode): Promise<ServiceSeries> {
   const raw =
     mode === "mock"
       ? await readMock<VercelRaw>("vercel-usage.json")
-      : await fetchVercel();
+      : await fetchVercelCached(utcDay());
 
   return {
     service: "vercel",
@@ -211,6 +213,44 @@ async function fetchVercel(): Promise<VercelRaw> {
 
   return { charges: await fetchVercelBillingCharges({ from, to }) };
 }
+
+// ---------------------------------------------------------------- 캐시
+
+/**
+ * 캐시 키로 쓸 UTC 날짜(YYYY-MM-DD).
+ *
+ * 두 벤더 모두 **하루치가 확정된 뒤에야** 그 날짜 버킷을 돌려준다. 그래서 갱신 주기를
+ * "마지막 호출로부터 24시간" 같은 타이머로 잡으면 확정 시점과 어긋나 최대 하루를
+ * 헛돈다. 날짜 문자열을 인자로 넘기면 `unstable_cache` 가 이걸 키에 포함하므로,
+ * UTC 자정이 지나는 순간 자동으로 캐시 미스가 나고 그때 한 번만 새로 받는다.
+ */
+export function utcDay(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
+/**
+ * ⚠️ 캐싱 범위를 **벤더 API 호출로만** 좁힌 것은 의도적이다.
+ *
+ * 페이지 전체를 캐싱하면 `config/client-keys.json` 을 고쳐도 하루 동안 반영되지
+ * 않는다. 그 파일은 "저장하고 새로고침하면 바로 보인다" 가 전제라(lib/client-keys.ts
+ * 주석 참고) 캐시 밖에 두어야 한다. 무거운 건 어차피 네트워크 쪽이다.
+ *
+ * `revalidate` 는 날짜 키가 안 바뀌는 동안의 상한선일 뿐이다. 실제 갱신 시점은
+ * 위 `utcDay()` 가 정한다.
+ */
+const DAY_SECONDS = 24 * 60 * 60;
+
+const fetchAnthropicCached = unstable_cache(
+  async (_utcDay: string) => fetchAnthropic(),
+  ["anthropic-raw"],
+  { revalidate: DAY_SECONDS, tags: ["usage", "usage:claude"] },
+);
+
+const fetchVercelCached = unstable_cache(
+  async (_utcDay: string) => fetchVercel(),
+  ["vercel-raw"],
+  { revalidate: DAY_SECONDS, tags: ["usage", "usage:vercel"] },
+);
 
 // ---------------------------------------------------------------- 공통
 
