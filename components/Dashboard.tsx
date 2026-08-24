@@ -187,6 +187,9 @@ export default function Dashboard({ series, mode }: Props) {
           // 키를 고르면 제목이 그 키 이름으로 바뀐다 (config/client-keys.json 우선순위 그대로).
           subjectLabel={view.focusLabel ?? active.label}
           bounds={view.bounds}
+          usageBreakdown={active.service === "claude"}
+          breakdownLabel={view.focusKey ? active.altBreakdown?.label : active.breakdownLabel}
+          metricKey={active.primaryMetric}
         />
       </div>
 

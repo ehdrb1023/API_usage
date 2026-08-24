@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Line,
   LineChart,
@@ -11,7 +13,14 @@ import {
 } from "recharts";
 
 import { SPIKE_THRESHOLD, isSpike } from "@/lib/analytics";
-import { formatDateLong, formatPct, formatUsd, formatUsdAxis, formatDateShort } from "@/lib/format";
+import {
+  formatDateLong,
+  formatDateShort,
+  formatPct,
+  formatTokens,
+  formatUsd,
+  formatUsdAxis,
+} from "@/lib/format";
 import type { DailyPoint } from "@/lib/types";
 
 type Props = {
@@ -23,6 +32,10 @@ type Props = {
    */
   subjectLabel: string;
   bounds: [string, string];
+  /** Claude에서는 비용 선 대신 모델/API 키별 토큰 누적 막대를 그린다. */
+  usageBreakdown?: boolean;
+  breakdownLabel?: string;
+  metricKey?: string;
 };
 
 type Row = {
@@ -32,7 +45,38 @@ type Row = {
   spike: boolean;
 };
 
-export default function TrendChart({ points, deltas, subjectLabel, bounds }: Props) {
+const BAR_COLORS = [
+  "var(--series-1)",
+  "var(--series-2)",
+  "var(--series-3)",
+  "var(--series-4)",
+  "var(--series-5)",
+  "var(--series-6)",
+  "var(--series-7)",
+  "var(--series-8)",
+];
+
+export default function TrendChart({
+  points,
+  deltas,
+  subjectLabel,
+  bounds,
+  usageBreakdown = false,
+  breakdownLabel = "모델",
+  metricKey = "totalTokens",
+}: Props) {
+  if (usageBreakdown) {
+    return (
+      <UsageBarChart
+        points={points}
+        subjectLabel={subjectLabel}
+        bounds={bounds}
+        breakdownLabel={breakdownLabel}
+        metricKey={metricKey}
+      />
+    );
+  }
+
   const rows: Row[] = points.map((p) => {
     const delta = deltas.get(p.date) ?? null;
     return { date: p.date, cost: p.costUsd, delta, spike: isSpike(delta) };
@@ -106,6 +150,155 @@ export default function TrendChart({ points, deltas, subjectLabel, bounds }: Pro
         </ResponsiveContainer>
       </div>
     </section>
+  );
+}
+
+type UsageSeries = { key: string; dataKey: string; label: string; color: string };
+type UsageRow = { date: string; [dataKey: string]: string | number };
+
+function UsageBarChart({
+  points,
+  subjectLabel,
+  bounds,
+  breakdownLabel,
+  metricKey,
+}: {
+  points: DailyPoint[];
+  subjectLabel: string;
+  bounds: [string, string];
+  breakdownLabel: string;
+  metricKey: string;
+}) {
+  const totals = new Map<string, { label: string; value: number }>();
+  for (const point of points) {
+    for (const item of point.items) {
+      const current = totals.get(item.key) ?? { label: item.label, value: 0 };
+      current.value += item.metrics[metricKey] ?? 0;
+      totals.set(item.key, current);
+    }
+  }
+
+  const series: UsageSeries[] = [...totals.entries()]
+    .sort((a, b) => b[1].value - a[1].value)
+    .map(([key, item], index) => ({
+      key,
+      dataKey: `usage_${index}`,
+      label: item.label,
+      color: BAR_COLORS[index % BAR_COLORS.length],
+    }));
+
+  const seriesByKey = new Map(series.map((item) => [item.key, item]));
+  const rows: UsageRow[] = points.map((point) => {
+    const row: UsageRow = { date: point.date };
+    for (const item of series) row[item.dataKey] = 0;
+    for (const item of point.items) {
+      const definition = seriesByKey.get(item.key);
+      if (definition) row[definition.dataKey] = item.metrics[metricKey] ?? 0;
+    }
+    return row;
+  });
+
+  return (
+    <section className="card p-4 sm:p-5">
+      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div>
+          <h2 className="text-sm font-semibold">{subjectLabel} 일별 토큰 사용량</h2>
+          <p className="mt-1 text-xs" style={{ color: "var(--text-secondary)" }}>
+            {breakdownLabel}별 누적 막대
+          </p>
+        </div>
+        <p className="text-xs tabular" style={{ color: "var(--text-muted)" }}>
+          {bounds[0]} ~ {bounds[1]}
+        </p>
+      </div>
+
+      <div style={{ width: "100%", height: 320 }}>
+        <ResponsiveContainer>
+          <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 4 }}>
+            <CartesianGrid vertical={false} stroke="var(--grid)" strokeDasharray="0" />
+            <XAxis
+              dataKey="date"
+              tickFormatter={formatDateShort}
+              tick={{ fill: "var(--text-muted)", fontSize: 11 }}
+              tickLine={false}
+              axisLine={{ stroke: "var(--axis)" }}
+              minTickGap={24}
+            />
+            <YAxis
+              tickFormatter={formatTokens}
+              tick={{ fill: "var(--text-muted)", fontSize: 11 }}
+              tickLine={false}
+              axisLine={false}
+              width={58}
+            />
+            <Tooltip cursor={{ fill: "var(--hover)" }} content={<UsageTooltip />} />
+            {series.map((item) => (
+              <Bar
+                key={item.key}
+                dataKey={item.dataKey}
+                name={item.label}
+                stackId="tokens"
+                fill={item.color}
+                isAnimationActive={false}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {series.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs">
+          {series.map((item) => (
+            <span key={item.key} className="flex items-center gap-1.5">
+              <span className="inline-block size-2.5 rounded-sm" style={{ background: item.color }} />
+              <span style={{ color: "var(--text-secondary)" }}>{item.label}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function UsageTooltip({
+  active,
+  label,
+  payload,
+}: {
+  active?: boolean;
+  label?: string;
+  payload?: { name?: string; value?: number; color?: string }[];
+}) {
+  if (!active || !payload?.length || !label) return null;
+  const visible = payload.filter((item) => (item.value ?? 0) > 0).reverse();
+  const total = visible.reduce((sum, item) => sum + (item.value ?? 0), 0);
+
+  return (
+    <div
+      className="rounded-lg px-3 py-2 text-xs shadow-lg"
+      style={{
+        background: "var(--surface-1)",
+        border: "1px solid var(--border)",
+        color: "var(--text-primary)",
+      }}
+    >
+      <p className="mb-1.5" style={{ color: "var(--text-secondary)" }}>
+        {formatDateLong(label)}
+      </p>
+      {visible.map((item) => (
+        <div key={item.name} className="flex min-w-44 items-center justify-between gap-4 py-0.5">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block size-2 rounded-sm" style={{ background: item.color }} />
+            {item.name}
+          </span>
+          <strong className="tabular">{formatTokens(item.value ?? 0)}</strong>
+        </div>
+      ))}
+      <div className="mt-1.5 flex justify-between gap-4 border-t pt-1.5" style={{ borderColor: "var(--border)" }}>
+        <span>합계</span>
+        <strong className="tabular">{formatTokens(total)}</strong>
+      </div>
+    </div>
   );
 }
 
