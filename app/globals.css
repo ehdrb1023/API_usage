@@ -112,3 +112,239 @@ body {
 .recharts-surface:focus {
   outline: none;
 }
+
+/* ------------------------------------------------------------------ 미니 위젯
+ *
+ * /mini 전용. 항상 띄워 두는 작은 창이라 규칙이 본문과 다르다.
+ *   - 세로 공간이 곧 정보량이라 행 높이를 22px 로 눌렀다.
+ *   - 숫자는 전부 tabular-nums. 1분마다 값이 바뀌는데 자릿수마다 폭이 흔들리면
+ *     가만히 있어도 화면이 떨리는 것처럼 보인다.
+ *   - 창을 얼마나 좁게 줄일지 모르니 폭 고정값을 두지 않는다.
+ */
+
+.mini {
+  padding: 8px 10px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.mini-head-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mini-mock {
+  color: var(--status-critical);
+  font-style: normal;
+}
+
+/* 갱신 중임을 알리는 최소한의 신호. 스피너는 이 크기에서 과하다. */
+.mini-pulse {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--axis);
+  opacity: 0.35;
+  transition: opacity 0.2s;
+}
+.mini-pulse.on {
+  background: var(--series-3);
+  opacity: 1;
+}
+
+.mini-gear {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px;
+}
+.mini-gear:hover {
+  color: var(--text-primary);
+}
+
+.mini-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.mini-row {
+  display: grid;
+  grid-template-columns: 6px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+}
+.mini-row:hover {
+  background: var(--hover);
+}
+
+.mini-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.mini-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-hint {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.mini-metric {
+  color: var(--text-muted);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* KST 가 아닌 기준일에만 붙는다. 어느 줄이 한국시간인지 헷갈리지 않도록. */
+.mini-badge {
+  margin-left: 3px;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-style: normal;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+.mini-value {
+  min-width: 62px;
+  text-align: right;
+  font-weight: 600;
+}
+
+.mini-na {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.mini-empty,
+.mini-error {
+  padding: 8px 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.mini-error {
+  color: var(--status-critical);
+  white-space: pre-wrap;
+}
+
+/* ---- 고르기 패널 */
+
+.mini-picker {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.mini-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mini-picker select {
+  max-width: 100%;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.mini-add,
+.mini-picker-foot button,
+.mini-picked button {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.mini-add:hover,
+.mini-picker-foot button:hover,
+.mini-picked button:hover {
+  background: var(--hover);
+}
+
+.mini-picked {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mini-picked li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.mini-picked-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-picked-label em {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.mini-picked-btns {
+  display: flex;
+  gap: 2px;
+  flex: none;
+}
+.mini-picked-btns button {
+  padding: 0 4px;
+  line-height: 1.4;
+}
+
+.mini-note {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.mini-picker-foot {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+}
+.mini-picker-foot a {
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.mini-picker-foot a:hover {
+  color: var(--text-primary);
+}

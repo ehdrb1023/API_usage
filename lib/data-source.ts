@@ -415,3 +415,60 @@ function fetchWindow() {
   );
   return { from: from.toISOString(), to: to.toISOString() };
 }
+
+// ---------------------------------------------------------------- 실시간(KST)
+
+/**
+ * 미니 위젯(/mini)이 쓰는 진입점들.
+ *
+ * 본문 대시보드는 "확정된 하루" 를 보여주므로 하루 단위 캐시로 충분하지만,
+ * 미니 위젯은 **진행 중인 KST 오늘**을 1분 간격으로 본다. 캐시 수명이 달라서
+ * 호출 경로를 따로 둔다. 자세한 배경은 lib/live.ts 주석 참고.
+ */
+
+/** 단가 역산용 원본(UTC 하루 단위). 하루 캐시를 그대로 재사용한다. */
+export async function getAnthropicRaw(): Promise<AnthropicRaw> {
+  const mode = getDataSourceMode();
+  return mode === "mock"
+    ? readMock<AnthropicRaw>("anthropic-usage.json")
+    : fetchAnthropicCached(utcDay());
+}
+
+/**
+ * 캐시 키로 쓸 UTC 분(YYYY-MM-DDTHH:MM).
+ *
+ * `revalidate` 초를 쓰지 않고 분 문자열을 키에 넣는 이유는 `utcDay()` 와 같다 —
+ * "마지막 호출 + N초" 는 탭이 여러 개면 갱신 시점이 제각각이 된다. 분이 바뀌는
+ * 순간에만 미스가 나게 하면 탭이 몇 개든 벤더 호출은 분당 1회로 고정된다.
+ */
+export function utcMinute(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 16);
+}
+
+/**
+ * KST 오늘 구간의 1시간 버킷. `group_by` 에 api_key_id 가 들어가야 키별로 쪼갤 수 있다.
+ *
+ * 한 페이지 최대 168버킷이라 24시간은 언제나 1페이지지만, 커서 루프를 쓰는 쪽이
+ * 안전하다(진행 중 버킷 포함 여부가 바뀌어도 상관없다).
+ */
+async function fetchAnthropicHourly(from: string, to: string) {
+  return fetchAllAnthropicUsageBuckets({
+    starting_at: from,
+    ending_at: to,
+    bucket_width: "1h",
+    limit: 24,
+    group_by: ["model", "api_key_id"],
+  });
+}
+
+const fetchAnthropicHourlyCached = unstable_cache(
+  async (_utcMinute: string, from: string, to: string) =>
+    fetchAnthropicHourly(from, to),
+  ["anthropic-hourly"],
+  // 분 문자열이 키에 들어가므로 이 값은 상한선일 뿐이다.
+  { revalidate: 120, tags: ["usage", "usage:claude", "live"] },
+);
+
+export async function getAnthropicHourly(from: string, to: string) {
+  return fetchAnthropicHourlyCached(utcMinute(), from, to);
+}
