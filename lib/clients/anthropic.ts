@@ -188,10 +188,18 @@ async function getJson<T>(
       body: await response.text().catch(() => "<본문 읽기 실패>"),
       url: url.toString(),
       hint: hintForStatus(response.status),
+      retryAfterSeconds: parseRetryAfter(response.headers.get("retry-after")),
     });
   }
 
   return (await response.json()) as T;
+}
+
+/** `retry-after` 는 초 단위 정수 또는 HTTP-date. 실무에서는 전자만 온다. */
+function parseRetryAfter(raw: string | null): number | undefined {
+  if (!raw) return undefined;
+  const seconds = Number(raw);
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
 // ---------------------------------------------------------------- 단일 페이지

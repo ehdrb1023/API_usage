@@ -38,6 +38,16 @@ export class ApiClientError extends Error {
   readonly body: string;
   /** 쿼리스트링까지 포함한 요청 URL. 키는 헤더로만 보내므로 여기 노출되지 않습니다. */
   readonly url: string;
+  /**
+   * 429 응답의 `retry-after` (초). 다시 두드려도 되는 시점을 알려면 이게 필요합니다.
+   * 없으면 undefined — 헤더를 안 주는 벤더도 있습니다.
+   *
+   * ⚠️ Anthropic Admin API 의 usage_report / cost_report 는 **시간당 90회**입니다
+   *    (2026-08-25 실측: `anthropic-ratelimit-requests-limit: 90`, 리셋 ~1시간).
+   *    분당 1회로 폴링하면 60회/시간이라, 같은 조직 키로 도는 인스턴스가 둘이면
+   *    바로 넘깁니다.
+   */
+  readonly retryAfterSeconds?: number;
 
   constructor(args: {
     vendor: "anthropic" | "vercel" | "supabase";
@@ -45,6 +55,7 @@ export class ApiClientError extends Error {
     body: string;
     url: string;
     hint?: string;
+    retryAfterSeconds?: number;
   }) {
     const hint = args.hint ? `\n힌트: ${args.hint}` : "";
     super(
@@ -56,6 +67,7 @@ export class ApiClientError extends Error {
     this.status = args.status;
     this.body = args.body;
     this.url = args.url;
+    this.retryAfterSeconds = args.retryAfterSeconds;
   }
 }
 
