@@ -43,11 +43,16 @@ import {
 
 const CENTS_PER_USD = 100;
 
+/**
+ * ⚠️ `Map` 이 아니라 평범한 객체다. 이 값은 `unstable_cache` 에 들어가는데
+ *    캐시는 JSON 직렬화를 거치므로 `Map` 은 `{}` 로 뭉개진다. 한 번 겪으면
+ *    "단가가 전부 0" 이라는 조용한 오작동으로 나타난다.
+ */
 export type TokenRates = {
   /** `${model}\t${tokenType}` → USD/토큰 */
-  byModelTokenType: Map<string, number>;
+  byModelTokenType: Record<string, number>;
   /** tokenType → USD/토큰 (모델 가중평균). 새 모델이 나왔을 때의 대안. */
-  byTokenType: Map<string, number>;
+  byTokenType: Record<string, number>;
   /** 전체 블렌디드 USD/토큰. 최후의 수단. */
   blended: number;
   /**
@@ -103,7 +108,7 @@ export function computeTokenRates(raw: AnthropicRaw): TokenRates {
     }
   }
 
-  const byModelTokenType = new Map<string, number>();
+  const byModelTokenType: Record<string, number> = {};
   const tokensByType = new Map<string, number>();
   const costByType = new Map<string, number>();
   let totalTokens = 0;
@@ -114,17 +119,17 @@ export function computeTokenRates(raw: AnthropicRaw): TokenRates {
     totalTokens += n;
 
     const usd = cost.get(k);
-    if (usd !== undefined && n > 0) byModelTokenType.set(k, usd / n);
+    if (usd !== undefined && n > 0) byModelTokenType[k] = usd / n;
   }
   for (const [k, usd] of cost) {
     const tokenType = k.split("\t")[1];
     costByType.set(tokenType, (costByType.get(tokenType) ?? 0) + usd);
   }
 
-  const byTokenType = new Map<string, number>();
+  const byTokenType: Record<string, number> = {};
   for (const [tokenType, n] of tokensByType) {
     const usd = costByType.get(tokenType);
-    if (usd !== undefined && n > 0) byTokenType.set(tokenType, usd / n);
+    if (usd !== undefined && n > 0) byTokenType[tokenType] = usd / n;
   }
 
   const totalCost = tokenCost + nonTokenCost;
@@ -145,8 +150,8 @@ export function rateFor(
   tokenType: string,
 ): number {
   return (
-    rates.byModelTokenType.get(rateKey(model, tokenType)) ??
-    rates.byTokenType.get(tokenType) ??
+    rates.byModelTokenType[rateKey(model, tokenType)] ??
+    rates.byTokenType[tokenType] ??
     rates.blended
   );
 }

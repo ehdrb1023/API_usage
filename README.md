@@ -33,25 +33,43 @@ API 키가 30개를 넘어가면 큰 화면에서 고르는 쪽이 훨씬 편해
 선택은 브라우저(localStorage)에만 저장되고 `storage` 이벤트로 창 사이를 넘나든다 —
 대시보드에서 체크하면 열려 있는 미니 창이 그 자리에서 바뀐다.
 
-Claude 만 **한국시간 자정 리셋**이다. 세 벤더의 하루 경계가 서로 다르고, 그건
-데이터 쪽에서 정해진다:
+창 띄우기·자동 시작·왜 트레이 아이콘이 아닌지는 `scripts/mini/README.md` 참고.
 
-| 서비스 | 하루 경계 | 갱신 | 비고 |
+## 하루 경계 — Claude 는 KST, 나머지는 벤더 기준
+
+대시보드와 미니 창 **양쪽 모두** Claude 는 한국시간 자정에 하루가 바뀐다.
+나머지 둘은 벤더가 정한 경계를 그대로 쓴다 — 바꿀 방법이 없기 때문이다.
+
+| 서비스 | 하루 경계 | 갱신 | 왜 |
 | --- | --- | --- | --- |
-| Claude | **KST 자정** | 1분 | 토큰은 실측, 비용은 단가 역산 추정 (실측 오차 ±0.1%) |
-| Vercel | 미 태평양시 자정 (KST 16시) | 하루 1회 | charge 자체가 PT 로 끊겨 나와 KST 로 자를 수 없다 |
+| Claude | **KST 자정** | 대시보드 하루 1회 / 미니 창 1분 | `usage_report` 가 `bucket_width=1h` 를 지원한다 |
+| Vercel | 미 태평양시 자정 (KST 16시) | 하루 1회 | charge 가 PT 자정으로 끊겨 나온다. 더 잘게 못 받는다 |
 | Supabase | UTC 자정 (KST 9시) | 하루 1회 | 사용량 버킷이 1일 단위 고정 |
 
-KST 가 아닌 줄에는 `PT` / `UTC` 배지가 붙는다. 창 띄우기·자동 시작·왜 트레이
-아이콘이 아닌지는 `scripts/mini/README.md` 참고.
+미니 창에서 KST 가 아닌 줄에는 `PT` / `UTC` 배지가 붙고, 대시보드는 상단에
+경고 줄이 뜬다. 같은 날짜라도 가리키는 24시간이 서로 다르다.
 
-### Claude 만 KST 로 자를 수 있는 이유
+### Claude 를 KST 로 자를 수 있는 이유 — 그리고 그 대가
 
-`usage_report` 는 `bucket_width=1h` 를 지원하고 **KST 자정은 UTC 15:00 정각**이라
-시간 버킷 경계와 정확히 맞는다. 그래서 토큰은 오차 없이 재구성된다.
-반면 `cost_report` 는 **1일 단위밖에 없다.** 그래서 최근 며칠의 (비용 ÷ 토큰) 으로
-모델·토큰 종류별 단가를 역산해 KST 실측 토큰에 곱한다 (`lib/anthropic-rates.ts`).
-하루를 빼고 맞히는 hold-out 검증에서 7일 모두 오차 ±0.1% 안에 들었다.
+**KST 자정은 UTC 15:00 정각**이라 시간 버킷 경계와 딱 맞는다. 그래서 1시간 버킷을
+주워 담으면 **토큰은 오차 없이** 재구성된다 (30분 오프셋 타임존이면 불가능했다).
+
+문제는 비용이다. `cost_report` 는 **1일(UTC) 단위밖에 없어서** KST 로 자를 방법이
+아예 없다. 그래서 같은 구간의 (비용 ÷ 토큰) 으로 모델·토큰 종류별 단가를 역산해
+KST 실측 토큰에 곱한다 (`lib/anthropic-rates.ts`, `lib/anthropic-kst.ts`).
+
+⚠️ **그 결과 화면의 Claude 비용은 전부 추정치다.** 정확도는 두 방향으로 확인했다.
+
+- 하루를 빼고 그 하루를 맞히는 hold-out 검증 7일 — 전부 오차 ±0.1% 이내
+- 2026-08-25 실측, 8/12~8/24 구간 — 실제 `cost_report` 합계 $187.21 vs
+  KST 재구성 합계 $187.21 (**오차 0.00%**). 날짜별로는 당연히 옮겨간다:
+  8/21 이 UTC $25.39 → KST $18.61, 8/22 가 UTC $1.60 → KST $8.69.
+
+소수점까지 정확한 청구액이 필요하면 Console 의 `cost_report` 값이 정답이고,
+그건 UTC 하루 기준이다. **둘 다 가질 수는 없다.**
+
+조회 비용: 1시간 버킷은 페이지당 168개(=7일)라 두 달 구간이 8페이지, 총 0.38MB,
+페이지당 1.5초다 (2026-08-25 실측). 하루 1회 캐시되므로 첫 로드만 ~15초, 이후 0.3초.
 
 ### ⚠️ Admin API 는 시간당 90회다
 
@@ -100,7 +118,8 @@ lib/
   mini-storage.ts          표시 항목 저장 (localStorage = 원본, 창 사이 동기화)
   vendor-fallback.ts       429 때 직전 값 유지 + retry-after 만큼 재시도 중단
   kst.ts                   KST 하루 경계 계산 (서버 로컬 타임존을 타지 않는다)
-  anthropic-rates.ts       cost_report 1d → 단가 역산 → KST 하루 비용 추정
+  anthropic-kst.ts         1시간 버킷 → KST 하루 재구성 (+ 비용 추정)
+  anthropic-rates.ts       cost_report 1d → 단가 역산
   client-keys.ts           config/client-keys.json 로더 (벤더 클라이언트 아님)
   adapters/anthropic.ts    Anthropic 응답 → 정규화 모델
   adapters/vercel.ts       Vercel 응답    → 정규화 모델
@@ -140,8 +159,8 @@ docs/api-response-notes.md 두 API 의 실제 응답 구조 정리
    직접 합산한다.
 3. **Vercel 의 프로젝트는 `Tags.ProjectName` 에 중첩되어 있다.** 최상위 필드가 아니다.
 
-본문 대시보드의 날짜는 전부 벤더 기준일이다 (Claude·Supabase 는 UTC, Vercel 은 PT).
-KST 로 끊어 보고 싶으면 미니 위젯(`/mini`) 쪽을 쓴다 — 위 표 참고.
+날짜 기준은 서비스마다 다르다 — Claude 는 KST, Vercel 은 PT, Supabase 는 UTC.
+자세한 이유와 정확도는 위의 "하루 경계" 절을 볼 것.
 
 ## 목업 데이터
 

@@ -28,12 +28,12 @@ import {
 } from "@/lib/adapters/anthropic";
 import { SUPABASE_METRICS, SUPABASE_PRIMARY_METRIC } from "@/lib/adapters/supabase";
 import { VERCEL_METRICS, VERCEL_PRIMARY_METRIC } from "@/lib/adapters/vercel";
-import { computeTokenRates, estimateCostResults } from "@/lib/anthropic-rates";
+import { estimateCostResults } from "@/lib/anthropic-rates";
 import { loadClientKeyNames } from "@/lib/client-keys";
 import type { Fresh } from "@/lib/vendor-fallback";
 import {
+  getAnthropicDaily,
   getAnthropicHourly,
-  getAnthropicRaw,
   getDataSourceMode,
   getServiceSeries,
   liveRefreshSeconds,
@@ -115,11 +115,11 @@ async function getClaudeLive(now: Date): Promise<LiveService> {
   const refreshSeconds = liveRefreshSeconds();
 
   const [dailyFresh, clientKeyNames] = await Promise.all([
-    getAnthropicRaw(),
+    getAnthropicDaily(),
     loadClientKeyNames(),
   ]);
-  const daily = dailyFresh.value;
-  const rates = computeTokenRates(daily);
+  // 단가는 하루 캐시에서 이미 역산돼 온다. 매 분 다시 계산할 이유가 없다.
+  const { raw: daily, rates } = dailyFresh.value;
 
   const hourly =
     mode === "mock"

@@ -12,7 +12,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { formatKstDate, kstDay, kstDayStart, kstTime, kstTodayWindow } from "@/lib/kst";
+import {
+  formatKstDate,
+  kstDay,
+  kstDayOf,
+  kstDayStart,
+  kstTime,
+  kstTodayWindow,
+} from "@/lib/kst";
 
 describe("kstDay", () => {
   it("UTC 15:00 을 경계로 날짜가 넘어간다 (= KST 자정)", () => {
@@ -67,6 +74,15 @@ describe("kstTodayWindow", () => {
     const w = kstTodayWindow(new Date("2026-08-25T14:59:59Z"));
     assert.equal(w.date, "2026-08-25");
     assert.equal(w.hours, 24);
+  });
+});
+
+describe("kstDayOf", () => {
+  it("1시간 버킷의 시작 시각을 KST 날짜로 접는다", () => {
+    // 14:00Z 버킷은 KST 로 같은 날 23시 → 그 날짜
+    assert.equal(kstDayOf("2026-08-24T14:00:00Z"), "2026-08-24");
+    // 15:00Z 버킷은 KST 로 **다음 날** 00시 → 날짜가 넘어간다
+    assert.equal(kstDayOf("2026-08-24T15:00:00Z"), "2026-08-25");
   });
 });
 

@@ -29,7 +29,10 @@ import {
 } from "@/lib/adapters/supabase";
 import { fetchAllSupabaseAccounts } from "@/lib/clients/supabase";
 import { fetchVercelBillingCharges } from "@/lib/clients/vercel";
+import { buildKstDays, type AnthropicKstResult } from "@/lib/anthropic-kst";
+import { computeTokenRates } from "@/lib/anthropic-rates";
 import { loadClientKeyNames } from "@/lib/client-keys";
+import { kstDay, kstDayStart } from "@/lib/kst";
 import { createStaleFallback, type Fresh } from "@/lib/vendor-fallback";
 import type { DayBoundary, ServiceId, ServiceSeries } from "@/lib/types";
 
@@ -46,8 +49,10 @@ import type { DayBoundary, ServiceId, ServiceSeries } from "@/lib/types";
  */
 const DAY_BOUNDARIES: Record<ServiceId, DayBoundary> = {
   claude: {
-    label: "UTC",
-    note: "Claude 는 UTC 자정(KST 오전 9시) 기준으로 하루를 끊습니다.",
+    label: "KST",
+    note:
+      "Claude 는 한국시간 자정 기준으로 하루를 끊습니다. " +
+      "원본은 UTC 자정 기준이지만, 1시간 버킷을 KST 자정(=UTC 15:00 정각)에 맞춰 다시 합쳤습니다.",
   },
   vercel: {
     label: "미 태평양시 (UTC−7)",
@@ -166,7 +171,7 @@ async function getClaude(mode: DataSourceMode): Promise<ServiceSeries> {
   const [raw, clientKeyNames] = await Promise.all([
     mode === "mock"
       ? readMock<AnthropicRaw>("anthropic-usage.json")
-      : fetchAnthropicCached(utcDay()),
+      : (await getAnthropicDaily()).value.raw,
     loadClientKeyNames(),
   ]);
 
@@ -182,7 +187,10 @@ async function getClaude(mode: DataSourceMode): Promise<ServiceSeries> {
     note:
       mode === "mock"
         ? "목업 데이터입니다. 실제 API 연동 시 필드명 확인 필요."
-        : undefined,
+        : "토큰 수는 1시간 버킷을 한국시간 하루로 다시 합친 실측값입니다. " +
+          "비용은 cost_report 가 UTC 하루 단위로만 나와서 한국시간으로 자를 수 없기 때문에, " +
+          "최근 구간의 (비용 ÷ 토큰) 으로 역산한 단가를 곱한 추정치입니다 " +
+          "(하루씩 빼고 맞히는 검증에서 오차 ±0.1%). 청구서와 소수점까지 같지는 않습니다.",
     altBreakdown: {
       label: "서비스",
       notice:
@@ -198,27 +206,33 @@ async function getClaude(mode: DataSourceMode): Promise<ServiceSeries> {
 }
 
 /**
- * Anthropic Admin API 두 엔드포인트를 커서 페이지네이션으로 전부 긁어온다.
+ * Anthropic Admin API 를 커서 페이지네이션으로 전부 긁어와 **KST 하루**로 다시 짠다.
  *
- * 키 검사 · 헤더 · 페이지 루프 · 에러 메시지는 lib/clients/anthropic.ts 가 맡는다.
- * 여기서는 조회 파라미터를 정하고 어댑터가 먹는 모양으로 감싸기만 한다.
+ * 키 검사 · 헤더 · 페이지 루프 · 에러 메시지는 lib/clients/anthropic.ts 가 맡고,
+ * KST 재구성과 단가 역산은 lib/anthropic-kst.ts 가 맡는다. 여기서는 조회 파라미터만
+ * 정한다.
+ *
+ * ⚠️ 사용량을 **1일이 아니라 1시간** 버킷으로 받는다. KST 자정(=UTC 15:00)이
+ *    시간 버킷 경계와 정확히 맞아떨어져야 하루가 어긋나지 않기 때문이다.
+ *    2026-08-25 실측: 조회 구간 1,344시간 → 8페이지, 총 0.38MB, 페이지당 1.5초.
+ *    KST 날짜로 접고 나면 56일 × 평균 10.6행이라 캐시에는 훨씬 작게 들어간다.
  */
-async function fetchAnthropic(): Promise<AnthropicRaw> {
-  const { from, to } = fetchWindow();
+async function fetchAnthropic(): Promise<AnthropicKstResult> {
+  const { from, to } = kstFetchWindow();
 
-  // bucket_width=1d 는 최대 31버킷/페이지라, 45일치는 반드시 2페이지 이상이 된다.
-  const [usage, cost, apiKeys] = await Promise.all([
+  const [hourly, cost, apiKeys] = await Promise.all([
     fetchAllAnthropicUsageBuckets({
       starting_at: from,
       ending_at: to,
-      bucket_width: "1d",
-      limit: 31,
+      bucket_width: "1h",
+      // 1h 는 페이지당 최대 168버킷(=7일). 구간이 두 달이라 8페이지쯤 된다.
+      limit: 168,
       // 키별(서비스별) 집계를 하려면 api_key_id 가 반드시 있어야 한다.
-      group_by: ["model", "api_key_id", "workspace_id"],
+      group_by: ["model", "api_key_id"],
     }),
-    // ⚠️ cost_report 는 description / workspace_id 만 group_by 가능하다.
-    //    api_key_id 를 넣으면 400 이 난다 (2026-08-14 실측). 키별 비용은
-    //    어댑터에서 토큰 비율로 안분한다.
+    // ⚠️ cost_report 는 **1d 뿐이고** group_by 도 description / workspace_id 만 된다.
+    //    api_key_id 를 넣으면 400 이 난다 (2026-08-14 실측). 그래서 이 값은 화면에
+    //    직접 나가지 않고 **단가 역산에만** 쓴다.
     fetchAllAnthropicCostBuckets({
       starting_at: from,
       ending_at: to,
@@ -230,11 +244,7 @@ async function fetchAnthropic(): Promise<AnthropicRaw> {
     fetchAnthropicKeyNames(),
   ]);
 
-  return {
-    usage_report: { data: usage },
-    cost_report: { data: cost },
-    api_keys: apiKeys,
-  };
+  return buildKstDays({ hourly, cost, apiKeys });
 }
 
 /**
@@ -370,9 +380,18 @@ export function utcDay(now: Date = new Date()): string {
  */
 const DAY_SECONDS = 24 * 60 * 60;
 
+/**
+ * ⚠️ 캐시 키가 `utcDay` 가 아니라 **`kstDay`** 다. 화면의 하루가 KST 로 바뀌었으니
+ *    갱신도 KST 자정에 일어나야 한다. UTC 자정(=KST 오전 9시)에 맞춰 두면 새 날짜의
+ *    첫 9시간이 어제 캐시에 갇힌다.
+ *
+ * 캐시에 들어가는 값은 원본 1시간 버킷이 아니라 **KST 하루로 접은 결과**다.
+ * 원본은 0.38MB 라 `unstable_cache` 의 2MB 제한에 아직 걸리지는 않지만, 구간이
+ * 길어지면 걸린다. 접고 나면 자릿수가 줄고, 어차피 원본을 다시 볼 일도 없다.
+ */
 const fetchAnthropicCached = unstable_cache(
-  async (_utcDay: string) => fetchAnthropic(),
-  ["anthropic-raw"],
+  async (_kstDay: string) => fetchAnthropic(),
+  ["anthropic-kst-days"],
   { revalidate: DAY_SECONDS, tags: ["usage", "usage:claude"] },
 );
 
@@ -407,6 +426,26 @@ async function readMock<T>(file: string): Promise<T> {
  * 조회 구간. 전월 동기 대비를 계산하려면 이번 달 + 전월 전체가 필요하므로
  * 전월 1일부터 오늘까지 받는다.
  */
+/**
+ * Claude 전용 조회 구간. `fetchWindow()` 와 달리 **KST 달력**을 기준으로 연다.
+ *
+ * UTC 기준으로 열면 전월 1일의 앞 9시간(KST 00:00~09:00)이 통째로 빠져서,
+ * 전월 동기 대비가 그만큼 적게 잡힌다. 하루가 KST 인데 구간이 UTC 면 양 끝이
+ * 어긋나는 게 당연하다.
+ */
+function kstFetchWindow() {
+  const today = kstDay();
+  const [y, m] = today.split("-").map(Number);
+  // 전월 1일 (KST). m 은 1~12 이므로 m-1 이 곧 "한 달 전" 의 0-index 월이 된다.
+  const first = new Date(Date.UTC(y, m - 2, 1));
+  const from = kstDayStart(first.toISOString().slice(0, 10));
+
+  // 진행 중인 시간대까지 포함하도록 다음 정시로 올린다.
+  const to = new Date(Math.ceil(Date.now() / 3_600_000) * 3_600_000);
+
+  return { from: from.toISOString(), to: to.toISOString() };
+}
+
 function fetchWindow() {
   const now = new Date();
   const from = new Date(
@@ -428,14 +467,22 @@ function fetchWindow() {
  * 호출 경로를 따로 둔다. 자세한 배경은 lib/live.ts 주석 참고.
  */
 
-/** 단가 역산용 원본(UTC 하루 단위). 하루 캐시를 그대로 재사용한다. */
-export async function getAnthropicRaw(): Promise<Fresh<AnthropicRaw>> {
+/**
+ * KST 하루로 재구성한 시리즈 + 역산한 단가. 하루 캐시를 대시보드와 미니 위젯이
+ * 함께 쓴다 — 미니 위젯은 단가만 꺼내 "KST 오늘" 에 다시 곱한다.
+ */
+export async function getAnthropicDaily(): Promise<Fresh<AnthropicKstResult>> {
   const mode = getDataSourceMode();
   if (mode === "mock") {
-    const value = await readMock<AnthropicRaw>("anthropic-usage.json");
-    return { value, at: Date.now(), stale: false };
+    // 목업에는 1시간 버킷이 없다. 화면 배치 확인용이라 UTC 하루 그대로 쓴다.
+    const raw = await readMock<AnthropicRaw>("anthropic-usage.json");
+    return {
+      value: { raw, rates: computeTokenRates(raw) },
+      at: Date.now(),
+      stale: false,
+    };
   }
-  return dailyFallback(() => fetchAnthropicCached(utcDay()));
+  return dailyFallback(() => fetchAnthropicCached(kstDay()));
 }
 
 /**
@@ -491,7 +538,7 @@ const fetchAnthropicHourlyCached = unstable_cache(
  * 이유는 lib/vendor-fallback.ts 주석 참고.
  */
 const hourlyFallback = createStaleFallback<AnthropicUsageBucket[]>();
-const dailyFallback = createStaleFallback<AnthropicRaw>();
+const dailyFallback = createStaleFallback<AnthropicKstResult>();
 
 export async function getAnthropicHourly(from: string, to: string) {
   return hourlyFallback(() => fetchAnthropicHourlyCached(liveBucket(), from, to));

@@ -59,3 +59,8 @@ export function formatKstDate(iso: string): string {
   const w = ["일", "월", "화", "수", "목", "금", "토"][d.getUTCDay()];
   return `${d.getUTCMonth() + 1}월 ${d.getUTCDate()}일 (${w})`;
 }
+
+/** UTC 시각(ISO)이 KST 로 몇 월 며칠인지. 1시간 버킷을 KST 날짜로 접을 때 쓴다. */
+export function kstDayOf(iso: string): string {
+  return kstDay(new Date(iso));
+}
