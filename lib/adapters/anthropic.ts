@@ -29,7 +29,7 @@ export const ANTHROPIC_METRICS: MetricSpec[] = [
 
 export const ANTHROPIC_PRIMARY_METRIC = "totalTokens";
 
-type UsageResult = {
+export type UsageResult = {
   model: string | null;
   /** `group_by[]=api_key_id` 를 안 걸면 null. 콘솔에서 직접 쓴 사용분도 null. */
   api_key_id?: string | null;
@@ -42,7 +42,7 @@ type UsageResult = {
   output_tokens: number;
 };
 
-type CostResult = {
+export type CostResult = {
   amount: string;
   currency: string;
   model: string | null;
@@ -51,7 +51,7 @@ type CostResult = {
   token_type?: string | null;
 };
 
-type Bucket<T> = { starting_at: string; ending_at: string; results: T[] };
+export type Bucket<T> = { starting_at: string; ending_at: string; results: T[] };
 
 /** List API Keys 응답에서 표시에 필요한 것만 추린 모양. */
 export type AnthropicApiKeyMeta = {
@@ -89,7 +89,7 @@ export const UNALLOCATED_KEY_ID = "__unallocated__";
  * cost_report 의 `token_type` → usage_report 에서 같은 종류의 토큰을 꺼내는 함수.
  * 키별 비용 안분(아래 참고)의 가중치가 된다.
  */
-const TOKEN_TYPE_PICKERS: Record<string, (r: UsageResult) => number> = {
+export const TOKEN_TYPE_PICKERS: Record<string, (r: UsageResult) => number> = {
   uncached_input_tokens: (r) => r.uncached_input_tokens ?? 0,
   cache_read_input_tokens: (r) => r.cache_read_input_tokens ?? 0,
   output_tokens: (r) => r.output_tokens ?? 0,
