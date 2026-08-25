@@ -12,6 +12,37 @@ npm run dev      # http://localhost:3000
 
 API 키 없이 바로 뜬다 (`.env` 의 `DATA_SOURCE=mock` 이 기본값).
 
+## 미니 위젯 — 항상 켜두는 "오늘 얼마 썼나"
+
+```bash
+npm run dev      # 데이터 서버
+npm run mini     # 오른쪽 아래에 항상 위 고정된 작은 창이 뜬다 (Windows)
+```
+
+`/mini` 는 **1분마다** 갱신되고, 띄울 항목을 ⚙ 버튼으로 직접 고른다 —
+서비스 전체뿐 아니라 **모델 하나**(claude-opus-5)나 **API 키 하나**(거래처별)를
+골라 비용·토큰 중 원하는 지표만 올릴 수 있다. 선택은 브라우저에 저장된다.
+
+Claude 만 **한국시간 자정 리셋**이다. 세 벤더의 하루 경계가 서로 다르고, 그건
+데이터 쪽에서 정해진다:
+
+| 서비스 | 하루 경계 | 갱신 | 비고 |
+| --- | --- | --- | --- |
+| Claude | **KST 자정** | 1분 | 토큰은 실측, 비용은 단가 역산 추정 (실측 오차 ±0.1%) |
+| Vercel | 미 태평양시 자정 (KST 16시) | 하루 1회 | charge 자체가 PT 로 끊겨 나와 KST 로 자를 수 없다 |
+| Supabase | UTC 자정 (KST 9시) | 하루 1회 | 사용량 버킷이 1일 단위 고정 |
+
+KST 가 아닌 줄에는 `PT` / `UTC` 배지가 붙는다. 창 띄우기·자동 시작·왜 트레이
+아이콘이 아닌지는 `scripts/mini/README.md` 참고.
+
+### Claude 만 KST 로 자를 수 있는 이유
+
+`usage_report` 는 `bucket_width=1h` 를 지원하고 **KST 자정은 UTC 15:00 정각**이라
+시간 버킷 경계와 정확히 맞는다. 그래서 토큰은 오차 없이 재구성된다.
+반면 `cost_report` 는 **1일 단위밖에 없다.** 그래서 최근 며칠의 (비용 ÷ 토큰) 으로
+모델·토큰 종류별 단가를 역산해 KST 실측 토큰에 곱한다 (`lib/anthropic-rates.ts`).
+하루를 빼고 맞히는 hold-out 검증에서 7일 모두 오차 ±0.1% 안에 들었다.
+
 ## 목업 ↔ 실제 API 전환
 
 `.env` 의 값 하나만 바꾸면 된다.
@@ -39,6 +70,10 @@ config/
 
 lib/
   data-source.ts           ★ 목업/실API 스위치 — 교체 지점은 여기 하나
+  live.ts                  /mini 용 "오늘" 스냅샷 (서비스마다 하루 경계가 다르다)
+  live-types.ts            /mini 가 주고받는 모양 (클라이언트도 import)
+  kst.ts                   KST 하루 경계 계산 (서버 로컬 타임존을 타지 않는다)
+  anthropic-rates.ts       cost_report 1d → 단가 역산 → KST 하루 비용 추정
   client-keys.ts           config/client-keys.json 로더 (벤더 클라이언트 아님)
   adapters/anthropic.ts    Anthropic 응답 → 정규화 모델
   adapters/vercel.ts       Vercel 응답    → 정규화 모델
@@ -47,6 +82,9 @@ lib/
   format.ts                숫자·통화·날짜 포맷
 
 components/                탭 · 기간선택 · 카드 · 라인차트 · 표
+  MiniWidget.tsx           /mini 본체 — 1분 폴링 + 표시 항목 고르기
+app/api/live/route.ts      /mini 가 폴링하는 JSON
+scripts/mini/              미니 창 띄우기 (앱 모드 + 항상 위 고정)
 scripts/gen_mock.py        목업 재생성 (시드 고정, 결정적)
 scripts/fetch_*.sh         실제 API 응답을 responses/ 에 떠보는 CLI
 docs/api-response-notes.md 두 API 의 실제 응답 구조 정리
@@ -74,7 +112,8 @@ docs/api-response-notes.md 두 API 의 실제 응답 구조 정리
    직접 합산한다.
 3. **Vercel 의 프로젝트는 `Tags.ProjectName` 에 중첩되어 있다.** 최상위 필드가 아니다.
 
-날짜는 전부 UTC 일 경계다. KST 와 9시간 차이가 난다.
+본문 대시보드의 날짜는 전부 벤더 기준일이다 (Claude·Supabase 는 UTC, Vercel 은 PT).
+KST 로 끊어 보고 싶으면 미니 위젯(`/mini`) 쪽을 쓴다 — 위 표 참고.
 
 ## 목업 데이터
 
