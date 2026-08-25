@@ -116,7 +116,7 @@ export default function Dashboard({ series, mode }: Props) {
           </span>
           <p>
             <strong style={{ color: "var(--text-primary)" }}>
-              두 서비스는 일 경계가 다릅니다
+              서비스마다 일 경계가 다릅니다
             </strong>{" "}
             —{" "}
             {series.map((s, i) => (
@@ -125,8 +125,8 @@ export default function Dashboard({ series, mode }: Props) {
                 {s.label} {s.dayBoundary.label}
               </span>
             ))}
-            . 같은 날짜라도 가리키는 24시간이 7시간 어긋나므로, 두 탭의 일별 수치를 같은
-            하루로 놓고 비교하지 마세요.
+            . 같은 날짜라도 가리키는 24시간이 서로 어긋나므로, 기준이 다른 탭의 일별 수치를
+            같은 하루로 놓고 비교하지 마세요.
           </p>
         </div>
       )}
@@ -223,6 +223,16 @@ export default function Dashboard({ series, mode }: Props) {
         비용은 USD 기준. {active.dayBoundary.note}
         {active.service === "claude" && " Claude 비용은 cost_report 의 센트 단위 값을 USD 로 변환한 값입니다."}
         {active.service === "vercel" && " Vercel 비용은 EffectiveCost(크레딧·할인 반영 실질 원가) 합계입니다. Committed 플랜은 BilledCost 가 0 으로 잡혀 실사용이 보이지 않습니다."}
+
+        {/*
+          ServiceSeries.note 는 타입에만 있고 화면에 안 나오고 있었다. Supabase 를
+          붙이면서 문제가 됐다 — 그 탭의 비용은 추정치인데 그 사실을 적어 둘 곳이
+          여기뿐이고, 조회에 실패한 탭도 사유를 여기로 내보낸다.
+          줄바꿈을 살려야 실패 사유(발급 절차)가 읽힌다.
+        */}
+        {active.note && (
+          <p className="mt-2 whitespace-pre-line">{active.note}</p>
+        )}
       </footer>
     </main>
   );

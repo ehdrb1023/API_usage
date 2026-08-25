@@ -1,11 +1,13 @@
 # API 클라이언트 준비 상태
 
-> **한 줄 요약:** `lib/clients/` 에 Anthropic Admin API·Vercel Billing API 클라이언트를
-> 타입·에러 처리·테스트까지 갖춰 넣어 뒀고, **2026-08-14 실제 키로 4개 엔드포인트 모두
-> 200 을 받아 §3 체크리스트를 대부분 소진했습니다.** `lib/data-source.ts` 도 이 클라이언트로
-> 교체 완료. 남은 미검증 항목은 §3 에 `⚠️` 로 남아 있습니다.
+> **한 줄 요약:** `lib/clients/` 에 Anthropic Admin API·Vercel Billing API·Supabase
+> Management API 클라이언트를 타입·에러 처리·테스트까지 갖춰 넣어 뒀고,
+> **2026-08-14 실제 키로 Anthropic·Vercel 4개 엔드포인트 모두 200 을 받아 §3 체크리스트를
+> 대부분 소진했습니다.** `lib/data-source.ts` 도 이 클라이언트로 교체 완료.
+> **Supabase 는 2026-08-25 에 추가했고 아직 실키 검증 전입니다 — §3-8 참고.**
 >
-> 작성일 2026-08-14 · 실키 검증 2026-08-14 · 스키마 출처는 각 파일 상단 주석 참고
+> 작성일 2026-08-14 · 실키 검증 2026-08-14 · Supabase 추가 2026-08-25 ·
+> 스키마 출처는 각 파일 상단 주석 참고
 
 ---
 
@@ -20,6 +22,10 @@
 | `lib/adapters/__tests__/anthropic.test.ts` | 13개 케이스 — 표시 이름 우선순위·겹침 구분자·두 축 합계 일치 |
 | `lib/__tests__/analytics.test.ts` | 15개 케이스 — 키별 시계열 필터, 키 기준 급증일 재계산, 기간 필터 유지 |
 | `lib/clients/__tests__/vercel.test.ts` | 20개 케이스 (목 응답) |
+| `lib/clients/supabase.ts` | `/v1/projects` + `/v1/organizations{,/slug}` + `usage.api-counts` + `/billing/addons` 호출. **계정(토큰) 여러 개를 동시에** 훑고, 계정·프로젝트 단위 실패를 격리 |
+| `lib/adapters/supabase.ts` | 요청 수 시계열 + **고정비 기반 비용 추정**. 프로젝트 축 / 계정 축 두 가지 breakdown |
+| `lib/clients/__tests__/supabase.test.ts` | 19개 케이스 — 계정 파싱·자리표시자 거부·429 재시도·부분 실패 격리 |
+| `lib/adapters/__tests__/supabase.test.ts` | 15개 케이스 — 일할 계산·플랜 요금·두 축 합계 일치 |
 | `lib/clients/__tests__/ts-resolve.mjs` | `node --test` 가 확장자 없는 상대 import 를 해석하게 해 주는 훅 (테스트 전용) |
 
 ### 확정된 엔드포인트
@@ -97,7 +103,7 @@ const daily = sumChargesByDay(charges, { onlyUsage: true });
 node --import ./lib/clients/__tests__/ts-resolve.mjs --test "lib/**/__tests__/*.test.ts"
 ```
 
-현재 **79 pass / 0 fail**. 별도 테스트 프레임워크를 설치하지 않고 Node 22 내장
+현재 **113 pass / 0 fail**. 별도 테스트 프레임워크를 설치하지 않고 Node 22 내장
 `node:test` + 타입 스트리핑만 씁니다 (`package.json` 은 건드리지 않았습니다 —
 `"test"` 스크립트로 등록하고 싶으면 위 명령을 그대로 넣으면 됩니다).
 
@@ -110,7 +116,8 @@ node --import ./lib/clients/__tests__/ts-resolve.mjs --test "lib/**/__tests__/*.
   `fetchVercel()` 은 `fetchVercelBillingCharges()` 를 부릅니다. 인라인 fetch·`requireEnv()` 제거.
 - **재시도(429/5xx 백오프)는 없습니다.** 대시보드가 하루 몇 번 부르는 수준이라 우선
   뺐습니다. 필요해지면 `getJson()` 한 곳만 감싸면 됩니다.
-- **Supabase 클라이언트는 없습니다.** 요청 범위 밖입니다.
+- ~~**Supabase 클라이언트는 없습니다.**~~ → **2026-08-25 추가 완료.** 다만 성격이
+  앞의 둘과 다릅니다 — 공개 API 에 **금액 엔드포인트가 없어** 비용이 추정치입니다. §3-8 참고.
 
 ---
 
@@ -380,3 +387,85 @@ PY
   그대로 두면 21번째 키부터 조용히 사라집니다 — 클라이언트가 100 으로 올려 보냅니다
   (이번 조직은 31개라 1페이지에 끝나 `has_more: true` 경로는 **실응답으로는 미검증**,
   목 응답 테스트로만 고정)
+
+---
+
+## 3-8. Supabase (2026-08-25 추가) — **실키 검증 전**
+
+Anthropic·Vercel 과 달리 이 절의 근거는 **실제 응답이 아니라 공식 OpenAPI 스펙**입니다
+(`GET https://api.supabase.com/api/v1-json`, 2026-08-25 수신, 경로 115개). 필드명·enum·
+쿼리 파라미터는 스펙 원본에서 그대로 옮겼으므로 정확하지만, 실제 응답으로 확인한 것은
+아직 하나도 없습니다.
+
+### 먼저 알아야 할 두 가지
+
+**① 금액(USD) 엔드포인트가 없습니다.** 스펙 115개 경로 중 usage/billing/cost 계열은
+아래가 전부이고, "이번 달 얼마" 에 해당하는 값은 어디에도 없습니다. 대시보드의
+Usage & Billing 화면은 공개 API 가 아닌 내부 `platform/` API 를 씁니다.
+
+| 경로 | 주는 것 | 한계 |
+|---|---|---|
+| `/v1/projects` | 프로젝트 전량 (ref·name·org·region·status) | 페이지네이션 없음 |
+| `/v1/organizations` | 조직 목록 | **`plan` 이 없음** |
+| `/v1/organizations/{slug}` | 조직 상세 + `plan` | 플랜 **이름**만. 금액 없음 |
+| `/v1/projects/{ref}/analytics/endpoints/usage.api-counts` | auth·rest·realtime·storage 요청 수 시계열 | **`from`/`to` 없음.** `interval` 만 |
+| `/v1/projects/{ref}/billing/addons` | 애드온 + `variant.price.amount` | **금액이 나오는 유일한 곳** |
+| `/v1/projects/{ref}/analytics/endpoints/metrics` | Prometheus 텍스트 (DB 크기·CPU) | 현재값 스냅샷만, 이력 없음 (미사용) |
+
+그래서 대시보드의 Supabase 비용은 **(조직 플랜 정액 + 프로젝트 애드온 정액) ÷ 그 달의 일수**
+입니다. 매일 같은 금액이 찍히고 사용량이 늘어도 비용 곡선은 움직이지 않습니다 — 버그가
+아닙니다. 빠지는 것: 무료 한도 초과 종량 과금(대역폭·저장용량·MAU·Edge Function),
+`price.type === "usage"` 인 애드온, 크레딧·할인·세금.
+
+플랜 요금표(`SUPABASE_PLAN_MONTHLY_USD`)는 **이 저장소에서 유일한 가격 하드코딩**입니다
+(`lib/adapters/supabase.ts`). API 가 플랜 이름만 주기 때문입니다. 가격이 바뀌면 거기만
+고치면 됩니다. `enterprise`·`platform` 은 공시가가 없어 0 으로 두고 화면에 `요금 미반영`
+배지를 답니다.
+
+**② 토큰이 계정(사람) 단위입니다.** PAT 하나로 그 사람이 속한 모든 조직은 보이지만,
+다른 계정 소유 프로젝트는 절대 안 보입니다. 그래서 이 클라이언트만 "토큰 목록" 을 받습니다:
+
+```
+SUPABASE_ACCESS_TOKENS=회사=sbp_aaa...,개인=sbp_bbb...
+```
+
+계정 하나가 죽어도(토큰 만료 등) 나머지 계정은 살고, 그 계정은 표에 `조회 실패` 배지로
+남습니다. 전부 죽으면 계정별 사유를 모아 던집니다.
+
+### 체크리스트 (첫 토큰을 넣은 직후 순서대로)
+
+- [ ] ⚠️ **`usage.api-counts` 가 며칠치를 돌려주는지** — 스펙에 명시가 없습니다.
+      `interval=1day` 로 부른 뒤 `result[].timestamp` 의 최소·최대를 확인하고 여기에 적으세요.
+      **Claude·Vercel 은 전월 1일~오늘을 우리가 지정해 받지만 Supabase 는 지정이 불가능**해서,
+      Supabase 탭만 날짜 축이 짧을 수 있습니다
+- [ ] ⚠️ **`timestamp` 가 UTC 자정 정각인지** — 현재 `DAY_BOUNDARIES.supabase` 를 UTC 로 적어
+      뒀습니다. 다른 시각으로 오면 Vercel 처럼 라벨을 고쳐야 합니다
+- [ ] ⚠️ **`/v1/organizations/{slug}` 의 `plan` 실제 값** — 스펙 enum 은
+      `free|pro|team|enterprise|platform` 입니다. 다른 값이 오면 요금표에 추가하세요
+- [ ] ⚠️ **`billing/addons` 의 `price.interval`** — 스펙상 `monthly` / `hourly` 둘 다 가능합니다.
+      어느 쪽이 실제로 오는지에 따라 일할 계산이 갈립니다 (어댑터는 둘 다 처리)
+- [ ] ⚠️ **Free 플랜 조직에서 `/billing/addons` 가 200 인지** — 403/404 면 어댑터가 비용 0 으로
+      떨어지고 사용량만 표시됩니다 (클라이언트가 애드온 실패는 조용히 삼킵니다)
+- [ ] ⚠️ **분당 60요청 제한** — 프로젝트 하나에 2요청(usage + addons)이 나갑니다. 계정당
+      프로젝트가 30개를 넘으면 429 가 납니다. 동시요청 4개로 제한하고 429 는 `Retry-After`
+      만큼 **한 번만** 재시도합니다. 프로젝트가 아주 많으면 재시도로도 부족할 수 있습니다
+- [ ] ⚠️ **일시정지(`INACTIVE`) 프로젝트** — 사용량 조회를 아예 건너뛰도록 해 뒀습니다
+      (analytics 가 404/403 을 낼 것으로 예상). 실제로는 200 이 온다면 이 분기를 지우세요
+      (`lib/clients/supabase.ts` 의 `fetchSupabaseAccountSnapshot`)
+- [ ] 첫 응답 원문을 `responses/supabase_*.json` 에 떨궈 두기
+- [ ] `mock/supabase-usage.json` 을 실제 응답 모양으로 교체 (지금은 스펙 기준 추정치)
+
+### 이번에 함께 드러난 것 (Supabase 와 무관하지만 같이 고침)
+
+- **`unstable_cache` 는 2MB 를 넘으면 저장을 거부합니다.** Vercel 탭을 켜자마자
+  `items over 2MB can not be cached (24591607 bytes)` 가 unhandledRejection 으로 터졌고,
+  캐시가 매번 실패해 요청마다 24.5MB 를 다시 받느라 첫 로드가 **14.5초** 걸렸습니다.
+  원본 charge 대신 **어댑터를 통과시킨 결과(`DailyPoint[]`)를 캐싱**하도록 바꿔
+  6.8초(첫 호출) / **0.07초(캐시 히트)** 가 됐습니다. Claude 는 버킷 응답이라 아직 여유가
+  있지만, 조직이 커지면 같은 한도에 걸릴 수 있습니다
+- **`ServiceSeries.note` 가 타입에만 있고 화면에 렌더되지 않고 있었습니다.**
+  Supabase 의 "비용은 추정치" 경고를 적을 곳이 거기뿐이라 드러났습니다.
+  `components/Dashboard.tsx` 각주에 `whitespace-pre-line` 으로 출력하도록 추가했습니다
+- **한 서비스가 실패하면 페이지 전체가 죽었습니다** (`Promise.all`). 토큰을 아직 안 넣은
+  서비스 때문에 멀쩡한 탭까지 못 보는 건 곤란해서, 실패한 서비스는 **빈 탭 + 사유**로
+  남기고 전부 실패했을 때만 에러 화면을 띄웁니다 (`getAllSeries`)

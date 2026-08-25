@@ -20,6 +20,13 @@ import {
   fetchAllAnthropicCostBuckets,
   fetchAllAnthropicUsageBuckets,
 } from "@/lib/clients/anthropic";
+import {
+  SUPABASE_METRICS,
+  SUPABASE_PRIMARY_METRIC,
+  adaptSupabase,
+  type SupabaseRaw,
+} from "@/lib/adapters/supabase";
+import { fetchAllSupabaseAccounts } from "@/lib/clients/supabase";
 import { fetchVercelBillingCharges } from "@/lib/clients/vercel";
 import { loadClientKeyNames } from "@/lib/client-keys";
 import type { DayBoundary, ServiceId, ServiceSeries } from "@/lib/types";
@@ -46,6 +53,12 @@ const DAY_BOUNDARIES: Record<ServiceId, DayBoundary> = {
       "Vercel 은 미 태평양시 자정(= 07:00 UTC, KST 오후 4시) 기준으로 하루를 끊습니다. " +
       "서머타임 해제 시 UTC−8 로 바뀔 수 있습니다 (미확인).",
   },
+  supabase: {
+    label: "UTC",
+    note:
+      "Supabase 사용량 버킷은 UTC 자정(KST 오전 9시) 기준입니다. " +
+      "다만 청구 주기는 조직마다 가입일 기준이라 달력 월과 다를 수 있습니다.",
+  },
 };
 
 /**
@@ -69,22 +82,80 @@ export function getDataSourceMode(): DataSourceMode {
 
 export async function getServiceSeries(service: ServiceId): Promise<ServiceSeries> {
   const mode = getDataSourceMode();
-  return service === "claude" ? getClaude(mode) : getVercel(mode);
+  if (service === "claude") return getClaude(mode);
+  if (service === "vercel") return getVercel(mode);
+  return getSupabase(mode);
 }
 
 /**
  * 화면에 띄울 서비스. 여기서 빼면 탭·데이터·API 호출이 통째로 빠진다.
  *
- * ⚠️ 2026-08-20 현재 "vercel" 을 잠가 둔 상태다. Billing API 가 8/15~8/19 구간
- *    charge 를 1만 건 넘게 돌려주면서 `BilledCost` 는 전부 0.00 으로만 찍힌다.
- *    원인 확인 전까지 0원짜리 표를 띄우지 않는다.
- *    되살리려면 아래 배열에 "vercel" 을 다시 넣기만 하면 된다.
+ * ✅ 2026-08-25 "vercel" 잠금 해제. 8/20 에 잠근 사유(`BilledCost` 가 전부 0.00)는
+ *    데이터 문제가 아니라 **필드 선택 문제**였다. Pro 플랜은 포함분이라
+ *    `PricingCategory: "Committed"` 로 잡히고 `BilledCost` 가 0 이 된다. 실제 원가는
+ *    `EffectiveCost` 에만 있고 어댑터는 이미 그쪽을 쓴다 (lib/adapters/vercel.ts).
+ *    같은 날 재확인: 8/17~8/23 charge 12,726건, EffectiveCost 합계 $21.91,
+ *    날짜별로 $1.94~$5.24 정상 계상.
  */
-const ENABLED_SERVICES: ServiceId[] = ["claude"];
+const ENABLED_SERVICES: ServiceId[] = ["claude", "vercel", "supabase"];
 
+/**
+ * 한 서비스가 죽어도 나머지 탭은 살린다.
+ *
+ * 2026-08-25 에 Supabase 를 켜면서 필요해졌다. Supabase 토큰만 아직 안 넣은 상태라도
+ * Claude·Vercel 탭은 멀쩡해야 하는데, `Promise.all` 은 하나만 던져도 전부 날린다.
+ * 대신 실패한 서비스는 **빈 탭 + 사유** 로 남긴다 — 탭을 통째로 감추면 "왜 없지" 가
+ * 되고, 페이지를 죽이면 멀쩡한 두 서비스까지 못 본다.
+ *
+ * 전부 실패하면 그대로 던진다. 그때는 app/page.tsx 의 에러 화면이 사유를 보여준다.
+ */
 export async function getAllSeries(): Promise<ServiceSeries[]> {
-  return Promise.all(ENABLED_SERVICES.map(getServiceSeries));
+  const results = await Promise.all(
+    ENABLED_SERVICES.map(async (service) => {
+      try {
+        return await getServiceSeries(service);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(`[data-source] ${service} 조회 실패 — 빈 탭으로 표시합니다.`, message);
+        return { service, error: message };
+      }
+    }),
+  );
+
+  const failures = results.filter(
+    (r): r is { service: ServiceId; error: string } => "error" in r,
+  );
+  if (failures.length === ENABLED_SERVICES.length) {
+    throw new Error(
+      failures.map((f) => `[${f.service}] ${f.error}`).join("\n\n"),
+    );
+  }
+
+  return results.map((r) =>
+    "error" in r ? emptySeries(r.service, r.error) : r,
+  );
 }
+
+/** 조회에 실패한 서비스의 자리. 지표 정의가 없으므로 표·차트는 비어 있고 사유만 뜬다. */
+function emptySeries(service: ServiceId, error: string): ServiceSeries {
+  return {
+    service,
+    label: SERVICE_LABELS[service],
+    breakdownLabel: "항목",
+    dayBoundary: DAY_BOUNDARIES[service],
+    primaryMetric: "requests",
+    metricSpecs: [],
+    points: [],
+    source: getDataSourceMode(),
+    note: `${SERVICE_LABELS[service]} 데이터를 불러오지 못했습니다.\n${error}`,
+  };
+}
+
+const SERVICE_LABELS: Record<ServiceId, string> = {
+  claude: "Claude",
+  vercel: "Vercel",
+  supabase: "Supabase",
+};
 
 // ---------------------------------------------------------------- Claude
 
@@ -182,11 +253,23 @@ async function fetchAnthropicKeyNames() {
 
 // ---------------------------------------------------------------- Vercel
 
+/**
+ * ⚠️ Vercel 만 **캐시에 넣는 값이 다르다** — 원본이 아니라 어댑터를 통과시킨 결과다.
+ *
+ * 2026-08-25 실측: 조회 구간(전월 1일~오늘)의 charge 원본이 **24.5MB** 였고,
+ * `unstable_cache` 는 2MB 를 넘으면 저장을 거부한다
+ * (`items over 2MB can not be cached`). 그 거부가 unhandledRejection 으로 터지면서
+ * 매 요청마다 24MB 를 다시 받아 첫 페이지 로드가 14.5초 걸렸다.
+ *
+ * charge 는 하루에 수천 건이지만 날짜×프로젝트로 접고 나면 수십 줄이라, 어댑터를
+ * 먼저 태우면 캐시에 들어가는 양이 1/100 이하로 줄어든다. 원본을 캐싱할 이유가
+ * 없었던 것뿐이다(원본을 다시 볼 일이 있으면 scripts/fetch_vercel_usage.sh 를 쓴다).
+ */
 async function getVercel(mode: DataSourceMode): Promise<ServiceSeries> {
-  const raw =
+  const points =
     mode === "mock"
-      ? await readMock<VercelRaw>("vercel-usage.json")
-      : await fetchVercelCached(utcDay());
+      ? adaptVercel(await readMock<VercelRaw>("vercel-usage.json"))
+      : await fetchVercelPointsCached(utcDay());
 
   return {
     service: "vercel",
@@ -195,7 +278,7 @@ async function getVercel(mode: DataSourceMode): Promise<ServiceSeries> {
     dayBoundary: DAY_BOUNDARIES.vercel,
     primaryMetric: VERCEL_PRIMARY_METRIC,
     metricSpecs: VERCEL_METRICS,
-    points: adaptVercel(raw),
+    points,
     source: mode,
     note:
       mode === "mock"
@@ -212,6 +295,51 @@ async function fetchVercel(): Promise<VercelRaw> {
   const { from, to } = fetchWindow();
 
   return { charges: await fetchVercelBillingCharges({ from, to }) };
+}
+
+// ---------------------------------------------------------------- Supabase
+
+/**
+ * Supabase 는 앞의 둘과 성격이 다르다 — 청구 금액 API 가 없어서 `costUsd` 가 추정치다.
+ * 그 사실을 `note` 로 화면에 못 박아 둔다. 자세한 계산 근거는 어댑터 상단 주석 참고.
+ */
+async function getSupabase(mode: DataSourceMode): Promise<ServiceSeries> {
+  const raw =
+    mode === "mock"
+      ? await readMock<SupabaseRaw>("supabase-usage.json")
+      : await fetchSupabaseCached(utcDay());
+
+  return {
+    service: "supabase",
+    label: "Supabase",
+    breakdownLabel: "프로젝트",
+    dayBoundary: DAY_BOUNDARIES.supabase,
+    primaryMetric: SUPABASE_PRIMARY_METRIC,
+    metricSpecs: SUPABASE_METRICS,
+    points: adaptSupabase(raw),
+    source: mode,
+    note:
+      (mode === "mock" ? "목업 데이터입니다. " : "") +
+      "Supabase 공개 API 에는 청구 금액 엔드포인트가 없습니다. 표의 비용은 " +
+      "조직 플랜 요금 + 프로젝트 애드온 정액을 일할 계산한 **추정치**이며, " +
+      "무료 한도를 넘긴 종량 과금(대역폭·저장용량·MAU 등)은 빠져 있습니다. " +
+      "정확한 청구액은 Supabase 대시보드에서 확인하세요.",
+    altBreakdown: {
+      label: "계정",
+      notice:
+        "Supabase 토큰은 계정(사람) 단위라, 계정마다 발급한 토큰을 따로 호출해 합칩니다. " +
+        "여기 없는 계정은 .env 의 SUPABASE_ACCESS_TOKENS 에 토큰이 안 들어간 것입니다.",
+      note: "프로젝트 표와 같은 하루를 계정 축으로 쪼갠 것이라 합계는 서로 같습니다.",
+    },
+  };
+}
+
+/**
+ * 계정 여러 개를 동시에 훑는다. 계정 하나가 실패해도 나머지는 살아서 온다
+ * (클라이언트가 `error` 를 스냅샷에 담아 준다).
+ */
+async function fetchSupabase(): Promise<SupabaseRaw> {
+  return fetchAllSupabaseAccounts();
 }
 
 // ---------------------------------------------------------------- 캐시
@@ -246,10 +374,24 @@ const fetchAnthropicCached = unstable_cache(
   { revalidate: DAY_SECONDS, tags: ["usage", "usage:claude"] },
 );
 
-const fetchVercelCached = unstable_cache(
-  async (_utcDay: string) => fetchVercel(),
-  ["vercel-raw"],
+/**
+ * 캐시 키 이름이 `vercel-points` 인 것은 실수가 아니다 — 원본이 아니라 어댑터 결과를
+ * 담는다는 뜻이다. 이유는 위 getVercel 주석 참고 (2MB 제한).
+ */
+const fetchVercelPointsCached = unstable_cache(
+  async (_utcDay: string) => adaptVercel(await fetchVercel()),
+  ["vercel-points"],
   { revalidate: DAY_SECONDS, tags: ["usage", "usage:vercel"] },
+);
+
+/**
+ * Supabase 는 프로젝트 수 × 2 만큼 요청이 나가고 분당 60요청 제한이 있어서,
+ * 캐시가 앞의 둘보다 더 중요하다. 날짜 키 방식은 동일하다.
+ */
+const fetchSupabaseCached = unstable_cache(
+  async (_utcDay: string) => fetchSupabase(),
+  ["supabase-raw"],
+  { revalidate: DAY_SECONDS, tags: ["usage", "usage:supabase"] },
 );
 
 // ---------------------------------------------------------------- 공통

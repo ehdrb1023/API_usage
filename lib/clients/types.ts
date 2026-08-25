@@ -32,7 +32,7 @@ export class MissingCredentialError extends Error {
 
 /** 요청은 나갔지만 2xx 가 아닌 응답이 온 경우. */
 export class ApiClientError extends Error {
-  readonly vendor: "anthropic" | "vercel";
+  readonly vendor: "anthropic" | "vercel" | "supabase";
   readonly status: number;
   /** 응답 본문 원문 (JSON 파싱 실패 대비해 문자열로 보관). */
   readonly body: string;
@@ -40,7 +40,7 @@ export class ApiClientError extends Error {
   readonly url: string;
 
   constructor(args: {
-    vendor: "anthropic" | "vercel";
+    vendor: "anthropic" | "vercel" | "supabase";
     status: number;
     body: string;
     url: string;
@@ -458,4 +458,144 @@ export interface VercelBillingChargesParams {
   teamId?: string;
   /** `teamId` 대신 팀 slug 로도 지정 가능. 둘 다 주면 둘 다 전송됩니다. */
   slug?: string;
+}
+
+// ============================================================================
+// Supabase — Management API
+// ============================================================================
+
+/**
+ * 아래 타입은 **2026-08-25 에 받은 공식 OpenAPI 스펙**(`GET https://api.supabase.com/api/v1-json`,
+ * 경로 115개)에서 그대로 옮겼습니다. 문서 페이지가 아니라 스펙 원본이라 필드명·enum 은
+ * 정확하지만, **실제 응답으로는 아직 검증하지 못했습니다** (토큰이 없어서).
+ * 첫 200 응답을 받으면 docs/api-clients-status.md 체크리스트를 갱신하세요.
+ *
+ * ⚠️ 가장 중요한 한계 — **금액(USD)을 주는 엔드포인트가 없습니다.**
+ *    스펙 115개 경로 중 usage/billing/cost 계열은 아래가 전부이고, 그 어디에도
+ *    "이번 달 얼마" 에 해당하는 값이 없습니다. 대시보드의 Usage & Billing 화면은
+ *    공개 API 가 아닌 내부 `platform/` API 를 씁니다.
+ *    따라서 이 서비스의 `costUsd` 는 **고정비 기반 추정치**입니다
+ *    (lib/adapters/supabase.ts 의 주석 참고).
+ */
+
+/** `GET /v1/organizations` — 목록에는 plan 이 없습니다. plan 은 slug 단건 조회에만. */
+export interface SupabaseOrganization {
+  /** @deprecated slug 를 쓰세요. */
+  id: string;
+  slug: string;
+  name: string;
+}
+
+/** `GET /v1/organizations/{slug}` — 목록 응답과 달리 `plan` 이 있습니다. */
+export interface SupabaseOrganizationDetail extends SupabaseOrganization {
+  plan?: "free" | "pro" | "team" | "enterprise" | "platform";
+}
+
+export type SupabaseProjectStatus =
+  | "INACTIVE"
+  | "ACTIVE_HEALTHY"
+  | "ACTIVE_UNHEALTHY"
+  | "COMING_UP"
+  | "UNKNOWN"
+  | "GOING_DOWN"
+  | "INIT_FAILED"
+  | "REMOVED"
+  | "RESTORING"
+  | "UPGRADING"
+  | "PAUSING"
+  | (string & {});
+
+/** `GET /v1/projects` — 토큰이 접근 가능한 **모든 조직의** 프로젝트가 한 번에 옵니다. */
+export interface SupabaseProject {
+  /** 20자 프로젝트 ref. 다른 모든 엔드포인트의 경로 파라미터. */
+  ref: string;
+  name: string;
+  organization_slug?: string;
+  /** @deprecated organization_slug 를 쓰세요. */
+  organization_id?: string;
+  region: string;
+  created_at: string;
+  status: SupabaseProjectStatus;
+}
+
+/**
+ * `GET /v1/projects/{ref}/analytics/endpoints/usage.api-counts?interval=1day`
+ *
+ * ⚠️ **from/to 파라미터가 없습니다.** `interval`(15min·30min·1hr·3hr·1day·3day·7day)만
+ *    받고, 조회 구간은 API 가 정합니다. 즉 임의 과거 구간을 다시 불러올 수 없고
+ *    "지금 기준 최근 N일" 만 볼 수 있습니다. 정확히 며칠치가 오는지는 실제 응답으로
+ *    확인해야 합니다 (스펙에 명시가 없음).
+ */
+export type SupabaseUsageInterval =
+  | "15min"
+  | "30min"
+  | "1hr"
+  | "3hr"
+  | "1day"
+  | "3day"
+  | "7day";
+
+export interface SupabaseUsageApiCount {
+  /** 버킷 시작 시각 (UTC). */
+  timestamp: string;
+  total_auth_requests: number;
+  total_realtime_requests: number;
+  total_rest_requests: number;
+  total_storage_requests: number;
+}
+
+export interface SupabaseUsageApiCountResponse {
+  result: SupabaseUsageApiCount[];
+  error?: unknown;
+}
+
+/**
+ * `GET /v1/projects/{ref}/billing/addons`
+ *
+ * ✅ 여기가 **유일하게 금액이 나오는 곳**입니다. `variant.price.amount` 에 실제
+ *    단가가 들어 있어서 컴퓨트 인스턴스·PITR·IPv4 같은 고정비는 하드코딩 없이
+ *    API 값 그대로 쓸 수 있습니다. 다만 조직 플랜 요금(Pro $25 등)은 여기 없습니다.
+ */
+export type SupabaseAddonType =
+  | "custom_domain"
+  | "compute_instance"
+  | "pitr"
+  | "ipv4"
+  | "auth_mfa_phone"
+  | "auth_mfa_web_authn"
+  | "log_drain"
+  | "etl_pipeline"
+  | (string & {});
+
+export interface SupabaseAddonPrice {
+  description?: string;
+  /** fixed = 정액, usage = 사용량 과금(금액을 여기서 알 수 없음). */
+  type: "fixed" | "usage";
+  interval: "monthly" | "hourly";
+  amount: number;
+}
+
+export interface SupabaseAddonVariant {
+  /** 예: "ci_micro", "pitr_7", "ipv4_default". */
+  id: string;
+  name: string;
+  price?: SupabaseAddonPrice;
+}
+
+export interface SupabaseSelectedAddon {
+  type: SupabaseAddonType;
+  variant: SupabaseAddonVariant;
+}
+
+export interface SupabaseAddonsResponse {
+  selected_addons: SupabaseSelectedAddon[];
+  available_addons?: unknown[];
+}
+
+/** Supabase 표준 에러 봉투. */
+export interface SupabaseErrorResponse {
+  message?: string;
+  error?: string;
+  /** 일부 엔드포인트는 이 형태로 옵니다. */
+  msg?: string;
 }

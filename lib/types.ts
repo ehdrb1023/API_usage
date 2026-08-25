@@ -3,10 +3,11 @@
  *
  * Claude 와 Vercel 은 원본 응답 구조가 완전히 다르다. UI 가 두 벤더의 스키마를
  * 직접 알지 않도록, 어댑터가 이 모양으로 변환한 뒤에만 화면으로 넘긴다.
- * 나중에 Supabase 를 추가할 때도 어댑터만 하나 더 쓰면 UI 는 그대로다.
+ * 2026-08-25 에 Supabase 를 추가할 때 실제로 그렇게 됐다 — 어댑터 하나만 더 쓰고
+ * UI 코드는 한 줄도 고치지 않았다.
  */
 
-export type ServiceId = "claude" | "vercel";
+export type ServiceId = "claude" | "vercel" | "supabase";
 
 export type RangeId = "7d" | "30d" | "mtd";
 
