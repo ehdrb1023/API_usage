@@ -8,6 +8,7 @@ import RangePicker from "@/components/RangePicker";
 import ServiceTabs from "@/components/ServiceTabs";
 import StatCards from "@/components/StatCards";
 import TrendChart from "@/components/TrendChart";
+import WidgetPicker from "@/components/WidgetPicker";
 import {
   BREAKDOWN_AXES,
   anchorDate,
@@ -32,6 +33,12 @@ export default function Dashboard({ series, mode }: Props) {
   const [range, setRange] = useState<RangeId>("30d");
   /** 서비스별 표에서 선택한 API 키. null 이면 전체 합계를 본다. */
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  /**
+   * 미니 창(/mini)에 띄울 항목 고르기. 대시보드에서 고르는 이유는 화면이 넓어서다 —
+   * API 키가 30개 넘는데 미니 창 안에서 고르는 건 고문이다. 고른 값은 localStorage 를
+   * 거쳐 열려 있는 미니 창에 그대로 반영된다.
+   */
+  const [showWidgetPicker, setShowWidgetPicker] = useState(false);
 
   const active = series.find((s) => s.service === service) ?? series[0];
 
@@ -93,8 +100,38 @@ export default function Dashboard({ series, mode }: Props) {
             setSelectedKey(null);
           }}
         />
-        <RangePicker value={range} onChange={setRange} />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowWidgetPicker(true)}
+            className="cursor-pointer rounded-lg px-3.5 py-1.5 text-sm transition-colors"
+            style={{
+              background: "var(--surface-1)",
+              border: "1px solid var(--border)",
+              color: "var(--text-secondary)",
+            }}
+          >
+            <span aria-hidden="true">⚙ </span>
+            미니 창 항목
+          </button>
+          <RangePicker value={range} onChange={setRange} />
+        </div>
       </div>
+
+      {showWidgetPicker && (
+        <div
+          className="wp-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="미니 창 표시 항목"
+          onClick={(e) => {
+            // 바깥을 눌러 닫는다. 안쪽 클릭이 올라온 것과 구분해야 한다.
+            if (e.target === e.currentTarget) setShowWidgetPicker(false);
+          }}
+        >
+          <WidgetPicker onClose={() => setShowWidgetPicker(false)} />
+        </div>
+      )}
 
       {/*
         일 경계 경고는 KPI·차트 **위**에 둔다. 각주에 두면 Vercel 탭 기준 5화면을

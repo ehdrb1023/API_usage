@@ -113,52 +113,87 @@ body {
   outline: none;
 }
 
-/* ------------------------------------------------------------------ 미니 위젯
+/* ================================================================= 미니 위젯
  *
- * /mini 전용. 항상 띄워 두는 작은 창이라 규칙이 본문과 다르다.
- *   - 세로 공간이 곧 정보량이라 행 높이를 22px 로 눌렀다.
- *   - 숫자는 전부 tabular-nums. 1분마다 값이 바뀌는데 자릿수마다 폭이 흔들리면
- *     가만히 있어도 화면이 떨리는 것처럼 보인다.
- *   - 창을 얼마나 좁게 줄일지 모르니 폭 고정값을 두지 않는다.
+ * /mini 전용. 항상 띄워 두는 창이라 본문과 규칙이 다르다.
+ *
+ * ★ 치수를 전부 `em` 으로 잡는다. 루트 `.mini` 의 글자 크기만 뷰포트 폭에 따라
+ *   `clamp()` 로 정해 두면, 창을 키웠을 때 글자·여백·색점이 **같은 비율로** 커진다.
+ *   px 로 고정하면 창을 키워도 작은 글씨가 넓은 여백에 떠 있는 모양이 된다.
+ *   상한(20px)을 두는 이유는 창을 최대화했을 때 글자가 우스꽝스럽게 커지는 걸 막기 위함.
+ *
+ * ★ 숫자는 전부 tabular-nums. 1분마다 값이 바뀌는데 자릿수마다 폭이 흔들리면
+ *   가만히 있어도 화면이 떨리는 것처럼 보인다.
  */
 
 .mini {
-  padding: 8px 10px 10px;
-  font-size: 12px;
+  --mini-gap: 0.6em;
+  position: relative;
+  min-height: 100vh;
+  padding: 0.7em 0.85em 0.85em;
+  font-size: clamp(11px, 1.15vw + 6px, 20px);
   line-height: 1.35;
   font-variant-numeric: tabular-nums;
+  background:
+    radial-gradient(
+      120% 80% at 100% 0%,
+      color-mix(in srgb, var(--series-1) 7%, transparent),
+      transparent 60%
+    ),
+    var(--page);
 }
+
+/* ---- 머리말 */
 
 .mini-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
-  padding-bottom: 6px;
+  gap: var(--mini-gap);
+  padding-bottom: 0.5em;
+  margin-bottom: 0.35em;
   border-bottom: 1px solid var(--border);
-  color: var(--text-secondary);
-  font-size: 11px;
+}
+
+.mini-clock {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45em;
+  min-width: 0;
+}
+.mini-clock strong {
+  font-size: 1.15em;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.mini-clock em {
+  font-style: normal;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.mini-mock {
+  padding: 0 0.35em;
+  border-radius: 0.25em;
+  background: color-mix(in srgb, var(--status-critical) 15%, transparent);
+  color: var(--status-critical) !important;
 }
 
 .mini-head-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0.5em;
+  flex: none;
 }
 
-.mini-mock {
-  color: var(--status-critical);
-  font-style: normal;
-}
-
-/* 갱신 중임을 알리는 최소한의 신호. 스피너는 이 크기에서 과하다. */
+/* 갱신 중임을 알리는 최소한의 신호. 이 크기에서 스피너는 과하다. */
 .mini-pulse {
-  width: 5px;
-  height: 5px;
+  width: 0.4em;
+  height: 0.4em;
   border-radius: 50%;
   background: var(--axis);
   opacity: 0.35;
-  transition: opacity 0.2s;
+  transition: opacity 0.25s, background 0.25s;
 }
 .mini-pulse.on {
   background: var(--series-3);
@@ -170,70 +205,86 @@ body {
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 12px;
+  font-size: 1em;
   line-height: 1;
-  padding: 2px;
+  padding: 0.15em;
+  border-radius: 0.3em;
+  transition: color 0.15s, background 0.15s;
 }
 .mini-gear:hover {
   color: var(--text-primary);
+  background: var(--hover);
 }
+
+/* ---- 줄 */
 
 .mini-rows {
   display: flex;
   flex-direction: column;
+  gap: 0.15em;
 }
 
 .mini-row {
   display: grid;
-  grid-template-columns: 6px minmax(0, 1fr) auto auto;
+  grid-template-columns: 0.22em minmax(0, 1fr) auto;
   align-items: center;
-  gap: 6px;
-  height: 22px;
+  gap: 0.55em;
+  padding: 0.3em 0.4em 0.3em 0;
+  border-radius: 0.4em;
+  transition: background 0.12s;
 }
 .mini-row:hover {
   background: var(--hover);
 }
 
-.mini-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
+/* 색점 대신 세로 막대. 행 높이가 커져도 비례해서 같이 자란다. */
+.mini-bar {
+  align-self: stretch;
+  min-height: 1.2em;
+  border-radius: 0.2em;
+}
+
+.mini-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45em;
+  min-width: 0;
 }
 
 .mini-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.mini-hint {
-  color: var(--text-muted);
-  font-style: normal;
+  font-weight: 500;
 }
 
 .mini-metric {
+  flex: none;
+  font-size: 0.78em;
   color: var(--text-muted);
-  font-size: 10px;
   white-space: nowrap;
 }
 
 /* KST 가 아닌 기준일에만 붙는다. 어느 줄이 한국시간인지 헷갈리지 않도록. */
 .mini-badge {
-  margin-left: 3px;
-  padding: 0 3px;
+  margin-left: 0.3em;
+  padding: 0 0.3em;
   border: 1px solid var(--border);
-  border-radius: 3px;
+  border-radius: 0.3em;
   font-style: normal;
-  font-size: 9px;
-  color: var(--text-muted);
+  font-size: 0.85em;
 }
 
 .mini-value {
-  min-width: 62px;
-  text-align: right;
-  font-weight: 600;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
-
+.mini-approx {
+  font-style: normal;
+  font-weight: 400;
+  color: var(--text-muted);
+}
 .mini-na {
   color: var(--text-muted);
   font-weight: 400;
@@ -241,110 +292,289 @@ body {
 
 .mini-empty,
 .mini-error {
-  padding: 8px 0;
+  padding: 0.6em 0;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 0.85em;
 }
 .mini-error {
   color: var(--status-critical);
   white-space: pre-wrap;
 }
 
-/* ---- 고르기 패널 */
-
-.mini-picker {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
+/* 선택창은 작은 창을 통째로 덮는다. 옆에 끼워 넣을 폭이 없다. */
+.mini-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  overflow: auto;
+  background: var(--page);
+  font-size: clamp(11px, 1.15vw + 6px, 20px);
 }
 
-.mini-picker-row {
+/* ============================================================= 표시 항목 선택
+ *
+ * 대시보드에서는 모달 안, 미니 창에서는 창 전체를 덮는 오버레이 안에서 같은 마크업이
+ * 뜬다. 그래서 폭·글자 크기를 스스로 정하지 않고 부모가 준 것을 따른다 —
+ * `.wp` 안쪽 치수도 전부 `em` 이다.
+ */
+
+.wp {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-direction: column;
+  gap: 0.7em;
+  padding: 0.85em;
+  min-height: 0;
 }
 
-.mini-picker select {
-  max-width: 100%;
-  padding: 2px 4px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface-1);
-  color: var(--text-primary);
-  font-size: 11px;
+.wp-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
 }
-
-.mini-add,
-.mini-picker-foot button,
-.mini-picked button {
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface-1);
-  color: var(--text-primary);
-  font-size: 11px;
-  padding: 2px 6px;
+.wp-head strong {
+  font-size: 1.05em;
+}
+.wp-count {
+  color: var(--text-muted);
+  font-size: 0.82em;
+}
+.wp-x {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
   cursor: pointer;
+  padding: 0.2em 0.35em;
+  border-radius: 0.3em;
+  font-size: 1em;
 }
-.mini-add:hover,
-.mini-picker-foot button:hover,
-.mini-picked button:hover {
+.wp-x:hover {
+  background: var(--hover);
+  color: var(--text-primary);
+}
+
+.wp-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.wp-search {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35em 0.6em;
+  border: 1px solid var(--border);
+  border-radius: 0.45em;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: 0.88em;
+}
+.wp-search:focus {
+  outline: 2px solid color-mix(in srgb, var(--series-1) 60%, transparent);
+  outline-offset: -1px;
+}
+.wp-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 0.82em;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.wp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9em;
+}
+
+.wp-service-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-bottom: 0.3em;
+  font-size: 0.95em;
+  font-weight: 650;
+}
+.wp-bar {
+  width: 0.22em;
+  height: 1em;
+  border-radius: 0.2em;
+}
+.wp-boundary,
+.wp-err-badge {
+  font-style: normal;
+  font-size: 0.78em;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.wp-err-badge {
+  color: var(--status-critical);
+}
+
+.wp-group {
+  margin-left: 0.15em;
+}
+.wp-group-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  width: 100%;
+  padding: 0.25em 0;
+  border: 0;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.85em;
+  cursor: pointer;
+  text-align: left;
+}
+.wp-group-head:hover {
+  color: var(--text-primary);
+}
+.wp-group-head em {
+  font-style: normal;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+.wp-caret {
+  width: 0.8em;
+  flex: none;
+}
+
+.wp-rows {
+  display: flex;
+  flex-direction: column;
+}
+
+.wp-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.28em 0.35em 0.28em 1.15em;
+  border-radius: 0.4em;
+}
+.wp-row:hover {
   background: var(--hover);
 }
 
-.mini-picked {
-  margin-top: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.mini-picked li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 11px;
-}
-
-.mini-picked-label {
+.wp-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 0.88em;
 }
-.mini-picked-label em {
-  color: var(--text-muted);
+.wp-hint,
+.wp-badge,
+.wp-idle {
   font-style: normal;
-}
-
-.mini-picked-btns {
-  display: flex;
-  gap: 2px;
-  flex: none;
-}
-.mini-picked-btns button {
-  padding: 0 4px;
-  line-height: 1.4;
-}
-
-.mini-note {
-  margin-top: 6px;
+  font-size: 0.85em;
   color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.4;
+}
+.wp-badge,
+.wp-idle {
+  margin-left: 0.35em;
+  padding: 0 0.3em;
+  border: 1px solid var(--border);
+  border-radius: 0.3em;
 }
 
-.mini-picker-foot {
-  margin-top: 6px;
+.wp-chips {
+  display: flex;
+  gap: 0.25em;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wp-chip {
+  padding: 0.15em 0.5em;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 0.78em;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.wp-chip:hover {
+  border-color: var(--axis);
+  color: var(--text-primary);
+}
+.wp-chip.on {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+  font-weight: 600;
+}
+.wp-chip em {
+  font-style: normal;
+  opacity: 0.7;
+}
+
+.wp-loading,
+.wp-error {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
+.wp-error {
+  color: var(--status-critical);
+}
+
+.wp-foot {
+  display: flex;
+  gap: 0.4em;
+  padding-top: 0.6em;
+  border-top: 1px solid var(--border);
+}
+.wp-foot button {
+  padding: 0.3em 0.7em;
+  border: 1px solid var(--border);
+  border-radius: 0.45em;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.wp-foot button:hover {
+  background: var(--hover);
+}
+
+/* ---- 대시보드에서 뜰 때의 껍데기 */
+
+.wp-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  font-size: 11px;
+  justify-content: center;
+  padding: 5vh 4vw;
+  background: color-mix(in srgb, #000 45%, transparent);
 }
-.mini-picker-foot a {
-  color: var(--text-muted);
-  text-decoration: none;
+.wp-modal > .wp {
+  width: min(46rem, 100%);
+  max-height: 90vh;
+  border: 1px solid var(--border);
+  border-radius: 0.9em;
+  background: var(--page);
+  box-shadow: 0 1.5em 3em rgba(0, 0, 0, 0.28);
+  font-size: 15px;
 }
-.mini-picker-foot a:hover {
-  color: var(--text-primary);
+
+/* 값은 그대로 뜨는데 언제 값인지 모르면 판단을 그르친다. 지연이면 못 박아 둔다. */
+.mini-stale {
+  padding: 0 0.35em;
+  border-radius: 0.25em;
+  background: color-mix(in srgb, var(--series-4) 22%, transparent);
+  color: var(--text-primary) !important;
+  cursor: help;
 }

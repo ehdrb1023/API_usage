@@ -29,6 +29,13 @@ export type LiveEntry = {
   label: string;
   /** 라벨 옆 작은 보조 표기 (키 앞자리 등) */
   hint?: string;
+  /** 라벨 옆 배지. 예: "비활성" */
+  badge?: string;
+  /**
+   * 오늘 사용량이 없어서 전부 0 인 항목. 선택창에는 나와야 하지만
+   * (지금은 안 쓰는 키도 감시 대상이 될 수 있다) 목록 아래쪽으로 내린다.
+   */
+  idle?: boolean;
   /** COST_METRIC_KEY 포함 */
   metrics: Record<string, number>;
 };
@@ -50,7 +57,13 @@ export type LiveService = {
   boundaryNote: string;
   /** 이 서비스 숫자가 몇 분 단위로 갱신되는지에 대한 한 줄 설명 */
   freshness: string;
+  /** 갱신에 실패해 예전 값을 대신 보여주는 중이면 true. */
+  stale?: boolean;
+  /** 이 숫자를 벤더에서 실제로 받아온 시각 (ISO). */
+  asOf?: string;
   metricSpecs: LiveMetricSpec[];
+  /** 선택창이 기본으로 노출할 지표. 나머지는 "지표 전체" 를 켜야 보인다. */
+  primaryMetric: string;
   groups: LiveGroup[];
   /** 조회 실패 시 사유. 있으면 groups 는 비어 있다. */
   error?: string;
@@ -62,6 +75,8 @@ export type LiveSnapshot = {
   kstDate: string;
   kstTime: string;
   source: "mock" | "api";
+  /** 클라이언트가 몇 초마다 다시 물어봐야 하는지. 서버 캐시 구간과 같은 값이다. */
+  refreshSeconds: number;
   services: LiveService[];
 };
 
@@ -95,3 +110,14 @@ export function findEntry(
   }
   return undefined;
 }
+
+/**
+ * 처음 열었을 때 띄우는 줄. 미니 창과 대시보드 선택창이 **같은 기본값**을 봐야 해서
+ * 컴포넌트가 아니라 여기에 둔다.
+ */
+export const DEFAULT_LINES: LiveLine[] = [
+  { service: "claude", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "Claude 전체" },
+  { service: "claude", entryId: "total", metricKey: "totalTokens", fallbackLabel: "Claude 전체" },
+  { service: "vercel", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "Vercel 전체" },
+  { service: "supabase", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "Supabase 전체" },
+];

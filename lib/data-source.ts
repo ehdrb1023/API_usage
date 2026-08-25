@@ -20,6 +20,7 @@ import {
   fetchAllAnthropicCostBuckets,
   fetchAllAnthropicUsageBuckets,
 } from "@/lib/clients/anthropic";
+import type { AnthropicUsageBucket } from "@/lib/clients/types";
 import {
   SUPABASE_METRICS,
   SUPABASE_PRIMARY_METRIC,
@@ -29,6 +30,7 @@ import {
 import { fetchAllSupabaseAccounts } from "@/lib/clients/supabase";
 import { fetchVercelBillingCharges } from "@/lib/clients/vercel";
 import { loadClientKeyNames } from "@/lib/client-keys";
+import { createStaleFallback, type Fresh } from "@/lib/vendor-fallback";
 import type { DayBoundary, ServiceId, ServiceSeries } from "@/lib/types";
 
 /**
@@ -427,22 +429,37 @@ function fetchWindow() {
  */
 
 /** 단가 역산용 원본(UTC 하루 단위). 하루 캐시를 그대로 재사용한다. */
-export async function getAnthropicRaw(): Promise<AnthropicRaw> {
+export async function getAnthropicRaw(): Promise<Fresh<AnthropicRaw>> {
   const mode = getDataSourceMode();
-  return mode === "mock"
-    ? readMock<AnthropicRaw>("anthropic-usage.json")
-    : fetchAnthropicCached(utcDay());
+  if (mode === "mock") {
+    const value = await readMock<AnthropicRaw>("anthropic-usage.json");
+    return { value, at: Date.now(), stale: false };
+  }
+  return dailyFallback(() => fetchAnthropicCached(utcDay()));
 }
 
 /**
- * 캐시 키로 쓸 UTC 분(YYYY-MM-DDTHH:MM).
+ * 실시간 갱신 주기(초). `.env` 의 `LIVE_REFRESH_SECONDS` 로 조절한다.
  *
- * `revalidate` 초를 쓰지 않고 분 문자열을 키에 넣는 이유는 `utcDay()` 와 같다 —
- * "마지막 호출 + N초" 는 탭이 여러 개면 갱신 시점이 제각각이 된다. 분이 바뀌는
- * 순간에만 미스가 나게 하면 탭이 몇 개든 벤더 호출은 분당 1회로 고정된다.
+ * ⚠️ 기본값 60초는 **한도에 가깝다.** Anthropic Admin API 는 시간당 90회인데
+ *    60초 주기면 60회/시간을 쓴다. 같은 조직 키로 도는 인스턴스가 둘이면(로컬 개발
+ *    서버 + 배포본) 넘긴다. 그럴 때는 120 이상으로 올리는 게 맞다.
+ *    30초 미만은 받지 않는다 — 벤더가 그만큼 자주 갱신해 주지도 않는다.
  */
-export function utcMinute(now: Date = new Date()): string {
-  return now.toISOString().slice(0, 16);
+export function liveRefreshSeconds(): number {
+  const raw = Number(process.env.LIVE_REFRESH_SECONDS);
+  return Number.isFinite(raw) && raw >= 30 ? Math.floor(raw) : 60;
+}
+
+/**
+ * 캐시 키로 쓸 시간 구간. `revalidate` 초를 쓰지 않고 구간 문자열을 키에 넣는
+ * 이유는 `utcDay()` 와 같다 — "마지막 호출 + N초" 는 탭이 여러 개면 갱신 시점이
+ * 제각각이 된다. 구간이 바뀌는 순간에만 미스가 나게 하면, 탭이 몇 개든 벤더 호출은
+ * 구간당 1회로 고정된다.
+ */
+export function liveBucket(now: Date = new Date()): string {
+  const ms = liveRefreshSeconds() * 1000;
+  return new Date(Math.floor(now.getTime() / ms) * ms).toISOString();
 }
 
 /**
@@ -462,13 +479,20 @@ async function fetchAnthropicHourly(from: string, to: string) {
 }
 
 const fetchAnthropicHourlyCached = unstable_cache(
-  async (_utcMinute: string, from: string, to: string) =>
+  async (_bucket: string, from: string, to: string) =>
     fetchAnthropicHourly(from, to),
   ["anthropic-hourly"],
-  // 분 문자열이 키에 들어가므로 이 값은 상한선일 뿐이다.
-  { revalidate: 120, tags: ["usage", "usage:claude", "live"] },
+  // 구간 문자열이 키에 들어가므로 이 값은 상한선일 뿐이다.
+  { revalidate: 600, tags: ["usage", "usage:claude", "live"] },
 );
 
+/**
+ * 실패해도 직전 값을 계속 내보낸다. 429 면 `retry-after` 동안 아예 안 두드린다 —
+ * 이유는 lib/vendor-fallback.ts 주석 참고.
+ */
+const hourlyFallback = createStaleFallback<AnthropicUsageBucket[]>();
+const dailyFallback = createStaleFallback<AnthropicRaw>();
+
 export async function getAnthropicHourly(from: string, to: string) {
-  return fetchAnthropicHourlyCached(utcMinute(), from, to);
+  return hourlyFallback(() => fetchAnthropicHourlyCached(liveBucket(), from, to));
 }

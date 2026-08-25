@@ -21,19 +21,22 @@
 
 import {
   ANTHROPIC_METRICS,
+  ANTHROPIC_PRIMARY_METRIC,
   adaptAnthropic,
   type AnthropicRaw,
   type UsageResult,
 } from "@/lib/adapters/anthropic";
-import { SUPABASE_METRICS } from "@/lib/adapters/supabase";
-import { VERCEL_METRICS } from "@/lib/adapters/vercel";
+import { SUPABASE_METRICS, SUPABASE_PRIMARY_METRIC } from "@/lib/adapters/supabase";
+import { VERCEL_METRICS, VERCEL_PRIMARY_METRIC } from "@/lib/adapters/vercel";
 import { computeTokenRates, estimateCostResults } from "@/lib/anthropic-rates";
 import { loadClientKeyNames } from "@/lib/client-keys";
+import type { Fresh } from "@/lib/vendor-fallback";
 import {
   getAnthropicHourly,
   getAnthropicRaw,
   getDataSourceMode,
   getServiceSeries,
+  liveRefreshSeconds,
 } from "@/lib/data-source";
 import { kstDay, kstTime, kstTodayWindow } from "@/lib/kst";
 import {
@@ -64,6 +67,8 @@ export async function getLiveSnapshot(now: Date = new Date()): Promise<LiveSnaps
     kstDate: kstDay(now),
     kstTime: kstTime(now),
     source: getDataSourceMode(),
+    // 폴링 주기를 클라이언트가 정하면 서버 캐시 구간과 어긋난다. 서버가 정해 준다.
+    refreshSeconds: liveRefreshSeconds(),
     services: [claude, vercel, supabase],
   };
 }
@@ -86,6 +91,7 @@ async function guard(
       boundary: "—",
       boundaryNote: "",
       freshness: "",
+      primaryMetric: COST_METRIC_KEY,
       metricSpecs: [COST_SPEC],
       groups: [],
       error: message,
@@ -106,19 +112,29 @@ async function guard(
 async function getClaudeLive(now: Date): Promise<LiveService> {
   const window = kstTodayWindow(now);
   const mode = getDataSourceMode();
+  const refreshSeconds = liveRefreshSeconds();
 
-  const [daily, clientKeyNames] = await Promise.all([
+  const [dailyFresh, clientKeyNames] = await Promise.all([
     getAnthropicRaw(),
     loadClientKeyNames(),
   ]);
+  const daily = dailyFresh.value;
   const rates = computeTokenRates(daily);
+
+  const hourly =
+    mode === "mock"
+      ? ({
+          value: mockHourlyStandIn(daily),
+          at: Date.now(),
+          stale: false,
+        } as Fresh<unknown>)
+      : ((await getAnthropicHourly(window.from, window.to)) as Fresh<unknown>);
 
   const usageResults =
     mode === "mock"
-      ? mockHourlyStandIn(daily)
-      : (await getAnthropicHourly(window.from, window.to)).flatMap(
-          (b) => b.results as UsageResult[],
-        );
+      ? (hourly.value as UsageResult[])
+      : (hourly.value as { results: UsageResult[] }[]).flatMap((b) => b.results);
+
 
   const synthetic: AnthropicRaw = {
     // starting_at 의 앞 10글자가 곧 날짜다 — KST 날짜를 그대로 박아 넣는다.
@@ -145,21 +161,43 @@ async function getClaudeLive(now: Date): Promise<LiveService> {
 
   const point = adaptAnthropic(synthetic, { clientKeyNames })[0];
 
+  /**
+   * 선택창에는 **오늘 안 쓴 키·모델도** 떠야 한다. 지금 0 인 거래처를 골라 두고
+   * 언제 쓰기 시작하는지 보는 게 이 위젯의 용도 중 하나이기 때문이다.
+   * 그래서 조회 구간 전체에서 한 번이라도 등장한 항목을 0 으로 채워 붙인다.
+   */
+  const history = adaptAnthropic(daily, { clientKeyNames });
+  const metricKeys = ANTHROPIC_METRICS.map((m) => m.key);
+
   return {
     id: "claude",
     label: "Claude",
     date: window.date,
     boundary: "KST",
     boundaryNote: `한국시간 ${window.date} 00:00 부터 지금까지 (매일 자정 리셋)`,
-    freshness: "1분마다 갱신 · 토큰은 실측, 비용은 추정",
+    freshness: hourly.stale
+      ? `갱신 실패 — ${new Date(hourly.at).toISOString().slice(11, 16)}Z 값입니다. ` +
+        `사유: ${hourly.reason ?? "알 수 없음"}`
+      : `${refreshSeconds}초마다 갱신 · 토큰은 실측, 비용은 추정`,
+    stale: hourly.stale,
+    asOf: new Date(hourly.at).toISOString(),
+    primaryMetric: ANTHROPIC_PRIMARY_METRIC,
     metricSpecs: [
       { ...COST_SPEC, estimated: true },
       ...toLiveSpecs(ANTHROPIC_METRICS),
     ],
     groups: [
       totalGroup(point),
-      { key: "model", label: "모델별", entries: entries(point?.items) },
-      { key: "key", label: "API 키별", entries: entries(point?.altItems) },
+      {
+        key: "model",
+        label: "모델별",
+        entries: withCatalog(entries(point?.items), catalog(history, "items"), metricKeys),
+      },
+      {
+        key: "key",
+        label: "API 키별",
+        entries: withCatalog(entries(point?.altItems), catalog(history, "altItems"), metricKeys),
+      },
     ],
   };
 }
@@ -178,7 +216,13 @@ function mockHourlyStandIn(raw: AnthropicRaw): UsageResult[] {
 
 const VENDOR_DAY: Record<
   "vercel" | "supabase",
-  { boundary: string; boundaryNote: string; freshness: string; specs: MetricSpec[] }
+  {
+    boundary: string;
+    boundaryNote: string;
+    freshness: string;
+    specs: MetricSpec[];
+    primary: string;
+  }
 > = {
   vercel: {
     boundary: "PT",
@@ -186,6 +230,7 @@ const VENDOR_DAY: Record<
       "Vercel 은 미 태평양시 자정(KST 오후 4시)에 하루가 바뀝니다. KST 하루로 자를 수 없습니다.",
     freshness: "하루 1회 갱신 (원본 charge 가 커서 분당 호출 불가)",
     specs: VERCEL_METRICS,
+    primary: VERCEL_PRIMARY_METRIC,
   },
   supabase: {
     boundary: "UTC",
@@ -193,6 +238,7 @@ const VENDOR_DAY: Record<
       "Supabase 사용량 버킷은 UTC 자정(KST 오전 9시) 기준이며 1일 단위로만 나옵니다.",
     freshness: "하루 1회 갱신 · 비용은 플랜 요금 일할 추정치",
     specs: SUPABASE_METRICS,
+    primary: SUPABASE_PRIMARY_METRIC,
   },
 };
 
@@ -206,19 +252,28 @@ async function getVendorDayLive(id: "vercel" | "supabase"): Promise<LiveService>
   const point = series.points[series.points.length - 1];
   const meta = VENDOR_DAY[id];
 
+  const metricKeys = meta.specs.map((m) => m.key);
   const groups: LiveGroup[] = [
     totalGroup(point),
     {
       key: "project",
       label: `${series.breakdownLabel}별`,
-      entries: entries(point?.items),
+      entries: withCatalog(
+        entries(point?.items),
+        catalog(series.points, "items"),
+        metricKeys,
+      ),
     },
   ];
-  if (point?.altItems?.length) {
+  if (series.points.some((p) => p.altItems?.length)) {
     groups.push({
       key: "alt",
       label: `${series.altBreakdown?.label ?? "보조"}별`,
-      entries: entries(point.altItems),
+      entries: withCatalog(
+        entries(point?.altItems),
+        catalog(series.points, "altItems"),
+        metricKeys,
+      ),
     });
   }
 
@@ -229,6 +284,7 @@ async function getVendorDayLive(id: "vercel" | "supabase"): Promise<LiveService>
     boundary: meta.boundary,
     boundaryNote: meta.boundaryNote,
     freshness: meta.freshness,
+    primaryMetric: meta.primary,
     metricSpecs: [
       { ...COST_SPEC, estimated: id === "supabase" },
       ...toLiveSpecs(meta.specs),
@@ -267,6 +323,53 @@ function entries(items: BreakdownItem[] | undefined): LiveEntry[] {
     id: item.key,
     label: item.label,
     hint: item.hint,
+    badge: item.badge,
     metrics: { ...item.metrics, [COST_METRIC_KEY]: item.costUsd },
   }));
+}
+
+/** 조회 구간 전체에서 한 번이라도 등장한 항목 목록 (중복 제거, 라벨은 첫 등장 기준). */
+function catalog(
+  points: DailyPoint[],
+  axis: "items" | "altItems",
+): LiveEntry[] {
+  const seen = new Map<string, LiveEntry>();
+  for (const p of points) {
+    for (const item of p[axis] ?? []) {
+      if (seen.has(item.key)) continue;
+      seen.set(item.key, {
+        id: item.key,
+        label: item.label,
+        hint: item.hint,
+        badge: item.badge,
+        metrics: {},
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+/**
+ * 오늘 값이 있는 항목을 먼저, 오늘 0 인 항목을 뒤에 붙인다.
+ *
+ * 뒤쪽은 지표를 전부 0 으로 채운다 — `undefined` 로 두면 미니 창이 "—" 를 띄우는데,
+ * "오늘 아직 안 씀" 과 "그런 항목이 없음" 은 다른 얘기다. $0.00 이라고 적어야 맞다.
+ */
+function withCatalog(
+  today: LiveEntry[],
+  all: LiveEntry[],
+  metricKeys: string[],
+): LiveEntry[] {
+  const have = new Set(today.map((e) => e.id));
+  const zeros = Object.fromEntries([
+    [COST_METRIC_KEY, 0],
+    ...metricKeys.map((k) => [k, 0] as const),
+  ]);
+
+  const idle = all
+    .filter((e) => !have.has(e.id))
+    .map((e) => ({ ...e, idle: true, metrics: { ...zeros } }))
+    .sort((a, b) => a.label.localeCompare(b.label, "ko"));
+
+  return [...today, ...idle];
 }
