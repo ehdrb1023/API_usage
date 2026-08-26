@@ -40,8 +40,7 @@ type Props = {
 
 const SERVICE_COLOR: Record<ServiceId, string> = {
   claude: "var(--series-2)",
-  vercel: "var(--series-1)",
-  supabase: "var(--series-3)",
+  gpt: "var(--series-1)",
 };
 
 export default function WidgetPicker({ snapshot: given, onClose }: Props) {
@@ -179,7 +178,7 @@ function ServiceSection({
   onToggle: (service: ServiceId, entry: LiveEntry, metricKey: string) => void;
 }) {
   // 기본은 비용 + 그 서비스의 대표 지표. 나머지는 "지표 전체" 를 켜야 나온다 —
-  // Vercel 은 지표가 9개라 전부 깔면 한 줄이 화면을 넘어간다.
+  // 지표를 전부 깔면 항목 하나가 대여섯 줄을 차지해 고르기가 어려워진다.
   const specs = allMetrics
     ? service.metricSpecs
     : service.metricSpecs.filter(

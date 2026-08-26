@@ -1,18 +1,23 @@
 /**
- * Anthropic Admin API / Vercel Billing API 의 **요청·응답 타입**.
+ * AI API 벤더의 **요청·응답 타입**. 이 대시보드는 AI API 비용만 다룬다.
  *
- * 출처 (2026-08-14 기준 공식 레퍼런스):
- *  - GET /v1/organizations/usage_report/messages
- *    https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-messages-usage-report
- *  - GET /v1/organizations/cost_report
- *    https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-cost-report
- *  - GET /v1/billing/charges  (FOCUS v1.3)
- *    https://vercel.com/docs/rest-api/billing/list-focus-billing-charges
- *    https://vercel.com/changelog/access-billing-usage-cost-data-api  (2026-02-19 공개)
+ * 출처:
+ *  Anthropic (2026-08-14 실키로 검증 완료)
+ *   - GET /v1/organizations/usage_report/messages
+ *     https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-messages-usage-report
+ *   - GET /v1/organizations/cost_report
+ *     https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-cost-report
+ *   - GET /v1/organizations/api_keys
+ *
+ *  OpenAI (⚠️ **공개 문서 기준 · 실응답 미검증**)
+ *   - GET /v1/organization/usage/completions
+ *   - GET /v1/organization/costs
+ *   - GET /v1/organization/projects
+ *     https://platform.openai.com/docs/api-reference/usage
  *
  * ⚠️ 로 표시된 항목은 **문서에는 있으나 실제 응답으로 아직 검증하지 못한 부분**입니다.
- *    키를 넣고 첫 200 응답을 받은 뒤 docs/api-clients-status.md 체크리스트를 따라
- *    하나씩 지워 주세요.
+ *    Anthropic 은 docs/api-clients-status.md, OpenAI 는 docs/openai-integration.md
+ *    체크리스트를 따라 하나씩 지워 주세요.
  */
 
 // ============================================================================
@@ -32,7 +37,7 @@ export class MissingCredentialError extends Error {
 
 /** 요청은 나갔지만 2xx 가 아닌 응답이 온 경우. */
 export class ApiClientError extends Error {
-  readonly vendor: "anthropic" | "openai" | "vercel" | "supabase";
+  readonly vendor: "anthropic" | "openai";
   readonly status: number;
   /** 응답 본문 원문 (JSON 파싱 실패 대비해 문자열로 보관). */
   readonly body: string;
@@ -50,7 +55,7 @@ export class ApiClientError extends Error {
   readonly retryAfterSeconds?: number;
 
   constructor(args: {
-    vendor: "anthropic" | "openai" | "vercel" | "supabase";
+    vendor: "anthropic" | "openai";
     status: number;
     body: string;
     url: string;
@@ -345,271 +350,6 @@ export interface AnthropicErrorResponse {
     message: string;
   };
   request_id?: string;
-}
-
-// ============================================================================
-// Vercel — FOCUS v1.3 billing charges
-// ============================================================================
-
-export type VercelChargeCategory =
-  | "Usage"
-  | "Purchase"
-  | "Credit"
-  | "Adjustment"
-  | "Tax";
-
-export type VercelPricingCategory =
-  | "Standard"
-  | "Committed"
-  | "Dynamic"
-  | "Other";
-
-/**
- * ✅ 2026-08-14 실제 응답으로 검증 — **FOCUS 표준 enum 이 아니라 Vercel 자체 분류**였습니다.
- *    문서의 "AI and Machine Learning" / "Compute" / "Storage" 같은 값은 하나도 오지 않고,
- *    아래 15종이 옵니다. 8,708건 중 8건은 이 필드가 아예 없습니다(구독 항목).
- *    새 값이 추가될 수 있으므로 `(string & {})` 로 열어 둡니다.
- */
-export type VercelServiceCategory =
-  | "AI Tokens"
-  | "Build & Deploy"
-  | "Content, Caching & Optimization"
-  | "Flat Rate Hidden"
-  | "KMS"
-  | "Observability"
-  | "Queues"
-  | "Sandbox"
-  | "Services"
-  | "Subscription Licenses"
-  | "VCR"
-  | "Vercel Connect"
-  | "Vercel Delivery Network"
-  | "Vercel Functions"
-  | "Web Application Firewall"
-  | (string & {});
-
-/**
- * FOCUS 스펙상 `Tags` 는 `additionalProperties: string` 인 자유 형식 맵이고,
- * 문서 설명에 "Vercel ProjectId / ProjectName 정보를 담는다" 고만 적혀 있습니다.
- *
- * ✅ 2026-08-14 실제 응답으로 검증 — 키 이름은 `ProjectId` / `ProjectName` 이 맞습니다.
- *    다만 **항상 오지는 않습니다**: 8,708건 중 2,108건(24%)은 `Tags` 가 `{}` 였고,
- *    이 몫이 프로젝트별 집계에서 "(프로젝트 미지정)" 으로 잡혀 비용 1위였습니다.
- *    프로젝트별 비용 집계는 최상위 필드가 아니라 이 중첩 경로를 씁니다.
- */
-export interface VercelChargeTags {
-  ProjectId?: string;
-  ProjectName?: string;
-  [key: string]: string | undefined;
-}
-
-/**
- * JSONL 한 줄 = charge 한 건.
- *
- * FOCUS v1.3 필수 필드(문서의 `required` 배열)는 non-optional 로,
- * 그 외는 optional 로 두었습니다.
- */
-export interface VercelFocusCharge {
-  /** 청구서의 기준이 되는 금액 (USD). "실제 지불액" 패널은 이 필드. */
-  BilledCost: number;
-  /** 할인·선결제 크레딧 상각을 반영한 상각 원가 (USD). FinOps 관점의 실질 원가. */
-  EffectiveCost: number;
-  /** ISO 4217. 현재 "USD" 고정. */
-  BillingCurrency: "USD";
-  PricingCurrency: "USD";
-
-  ChargeCategory: VercelChargeCategory;
-  /** 포함(inclusive), ISO 8601 UTC. */
-  ChargePeriodStart: string;
-  /** 제외(exclusive), ISO 8601 UTC. */
-  ChargePeriodEnd: string;
-
-  /**
-   * 소비량. 측정 가능한 소비가 없는 charge 는 null.
-   *
-   * ✅ 2026-08-14 검증 — `PricingQuantity` 와 단위가 다른 정도가 아니라 **성격이 다릅니다**.
-   *    `PricingUnit` 이 전부 `"USD"` 로 오고 `PricingQuantity` 는 금액(대부분 0)이었습니다.
-   *    사용량은 `ConsumedQuantity` + `ConsumedUnit` 만 보면 됩니다.
-   *    정수가 아닐 수 있습니다 (예: Edge Requests 4940.98 Requests — 일 경계 안분).
-   */
-  ConsumedQuantity: number | null;
-  /**
-   * ✅ 2026-08-14 실제 응답으로 검증 — 실제로 오는 값은 21종입니다:
-   *    minute / hour / gigabyte / gigabyte-hour / gigabyte-month /
-   *    Invocations / Requests / Execution Units / Reads / Writes / Operations /
-   *    Units / Transformations / Creations / Events / Data Points / Traces /
-   *    Projects / Seats / Credits, 그리고 구독 항목은 null.
-   *    지표 매핑은 lib/adapters/vercel.ts 의 UNIT_TO_METRIC 참고.
-   */
-  ConsumedUnit: string | null;
-
-  PricingQuantity: number;
-  PricingUnit: string;
-  PricingCategory: VercelPricingCategory;
-
-  /** 예: "Fluid Compute", "Edge Requests". */
-  ServiceName: string;
-  ServiceProviderName: string;
-  /** 스펙상 required 가 아님 — 없을 수 있습니다. */
-  ServiceCategory?: VercelServiceCategory;
-
-  /** 스펙상 required 가 아님. 예: "icn1". */
-  RegionId?: string;
-  /** 스펙상 required 가 아님. 예: "Seoul". */
-  RegionName?: string;
-
-  Tags: VercelChargeTags;
-}
-
-export interface VercelBillingChargesParams {
-  /** 필수. 포함(inclusive), ISO 8601 UTC. */
-  from: string;
-  /** 필수. 제외(exclusive), ISO 8601 UTC. 최대 조회 범위는 1년. */
-  to: string;
-  /** 팀 스코프. 없으면 토큰의 개인 스코프로 조회됩니다. */
-  teamId?: string;
-  /** `teamId` 대신 팀 slug 로도 지정 가능. 둘 다 주면 둘 다 전송됩니다. */
-  slug?: string;
-}
-
-// ============================================================================
-// Supabase — Management API
-// ============================================================================
-
-/**
- * 아래 타입은 **2026-08-25 에 받은 공식 OpenAPI 스펙**(`GET https://api.supabase.com/api/v1-json`,
- * 경로 115개)에서 그대로 옮겼습니다. 문서 페이지가 아니라 스펙 원본이라 필드명·enum 은
- * 정확하지만, **실제 응답으로는 아직 검증하지 못했습니다** (토큰이 없어서).
- * 첫 200 응답을 받으면 docs/api-clients-status.md 체크리스트를 갱신하세요.
- *
- * ⚠️ 가장 중요한 한계 — **금액(USD)을 주는 엔드포인트가 없습니다.**
- *    스펙 115개 경로 중 usage/billing/cost 계열은 아래가 전부이고, 그 어디에도
- *    "이번 달 얼마" 에 해당하는 값이 없습니다. 대시보드의 Usage & Billing 화면은
- *    공개 API 가 아닌 내부 `platform/` API 를 씁니다.
- *    따라서 이 서비스의 `costUsd` 는 **고정비 기반 추정치**입니다
- *    (lib/adapters/supabase.ts 의 주석 참고).
- */
-
-/** `GET /v1/organizations` — 목록에는 plan 이 없습니다. plan 은 slug 단건 조회에만. */
-export interface SupabaseOrganization {
-  /** @deprecated slug 를 쓰세요. */
-  id: string;
-  slug: string;
-  name: string;
-}
-
-/** `GET /v1/organizations/{slug}` — 목록 응답과 달리 `plan` 이 있습니다. */
-export interface SupabaseOrganizationDetail extends SupabaseOrganization {
-  plan?: "free" | "pro" | "team" | "enterprise" | "platform";
-}
-
-export type SupabaseProjectStatus =
-  | "INACTIVE"
-  | "ACTIVE_HEALTHY"
-  | "ACTIVE_UNHEALTHY"
-  | "COMING_UP"
-  | "UNKNOWN"
-  | "GOING_DOWN"
-  | "INIT_FAILED"
-  | "REMOVED"
-  | "RESTORING"
-  | "UPGRADING"
-  | "PAUSING"
-  | (string & {});
-
-/** `GET /v1/projects` — 토큰이 접근 가능한 **모든 조직의** 프로젝트가 한 번에 옵니다. */
-export interface SupabaseProject {
-  /** 20자 프로젝트 ref. 다른 모든 엔드포인트의 경로 파라미터. */
-  ref: string;
-  name: string;
-  organization_slug?: string;
-  /** @deprecated organization_slug 를 쓰세요. */
-  organization_id?: string;
-  region: string;
-  created_at: string;
-  status: SupabaseProjectStatus;
-}
-
-/**
- * `GET /v1/projects/{ref}/analytics/endpoints/usage.api-counts?interval=1day`
- *
- * ⚠️ **from/to 파라미터가 없습니다.** `interval`(15min·30min·1hr·3hr·1day·3day·7day)만
- *    받고, 조회 구간은 API 가 정합니다. 즉 임의 과거 구간을 다시 불러올 수 없고
- *    "지금 기준 최근 N일" 만 볼 수 있습니다. 정확히 며칠치가 오는지는 실제 응답으로
- *    확인해야 합니다 (스펙에 명시가 없음).
- */
-export type SupabaseUsageInterval =
-  | "15min"
-  | "30min"
-  | "1hr"
-  | "3hr"
-  | "1day"
-  | "3day"
-  | "7day";
-
-export interface SupabaseUsageApiCount {
-  /** 버킷 시작 시각 (UTC). */
-  timestamp: string;
-  total_auth_requests: number;
-  total_realtime_requests: number;
-  total_rest_requests: number;
-  total_storage_requests: number;
-}
-
-export interface SupabaseUsageApiCountResponse {
-  result: SupabaseUsageApiCount[];
-  error?: unknown;
-}
-
-/**
- * `GET /v1/projects/{ref}/billing/addons`
- *
- * ✅ 여기가 **유일하게 금액이 나오는 곳**입니다. `variant.price.amount` 에 실제
- *    단가가 들어 있어서 컴퓨트 인스턴스·PITR·IPv4 같은 고정비는 하드코딩 없이
- *    API 값 그대로 쓸 수 있습니다. 다만 조직 플랜 요금(Pro $25 등)은 여기 없습니다.
- */
-export type SupabaseAddonType =
-  | "custom_domain"
-  | "compute_instance"
-  | "pitr"
-  | "ipv4"
-  | "auth_mfa_phone"
-  | "auth_mfa_web_authn"
-  | "log_drain"
-  | "etl_pipeline"
-  | (string & {});
-
-export interface SupabaseAddonPrice {
-  description?: string;
-  /** fixed = 정액, usage = 사용량 과금(금액을 여기서 알 수 없음). */
-  type: "fixed" | "usage";
-  interval: "monthly" | "hourly";
-  amount: number;
-}
-
-export interface SupabaseAddonVariant {
-  /** 예: "ci_micro", "pitr_7", "ipv4_default". */
-  id: string;
-  name: string;
-  price?: SupabaseAddonPrice;
-}
-
-export interface SupabaseSelectedAddon {
-  type: SupabaseAddonType;
-  variant: SupabaseAddonVariant;
-}
-
-export interface SupabaseAddonsResponse {
-  selected_addons: SupabaseSelectedAddon[];
-  available_addons?: unknown[];
-}
-
-/** Supabase 표준 에러 봉투. */
-export interface SupabaseErrorResponse {
-  message?: string;
-  error?: string;
-  /** 일부 엔드포인트는 이 형태로 옵니다. */
-  msg?: string;
 }
 
 // ============================================================================

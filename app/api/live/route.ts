@@ -1,11 +1,11 @@
 import { getLiveSnapshot } from "@/lib/live";
 
 /**
- * GET /api/live — 미니 위젯이 1분마다 폴링하는 "오늘" 스냅샷.
+ * GET /api/live — 미니 위젯이 1분마다 폴링하는 "오늘"(KST) 스냅샷.
  *
  * 라우트 자체는 캐시하지 않는다(`no-store`). 벤더 호출 캐시는 lib/data-source.ts 에
- * 이미 있고 — Claude 는 분 단위, Vercel·Supabase 는 하루 단위 — 여기서 또 캐시하면
- * 두 층이 어긋나 "새로고침해도 안 바뀌는" 상태가 생긴다.
+ * 이미 두 층으로 있다 — 오늘 사용량은 `liveBucket()` 구간 단위, 하루 시계열·단가는
+ * KST 날짜 단위. 여기서 또 캐시하면 세 층이 어긋나 "새로고침해도 안 바뀌는" 상태가 된다.
  */
 export const dynamic = "force-dynamic";
 

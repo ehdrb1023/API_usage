@@ -43,8 +43,7 @@ const FALLBACK_REFRESH_MS = 60_000;
 
 const SERVICE_COLOR: Record<ServiceId, string> = {
   claude: "var(--series-2)",
-  vercel: "var(--series-1)",
-  supabase: "var(--series-3)",
+  gpt: "var(--series-1)",
 };
 
 export default function MiniWidget() {

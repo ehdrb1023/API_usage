@@ -3,9 +3,9 @@
  * 여기에 fs·API 키를 건드리는 코드를 넣지 말 것. 타입과 순수 함수만.
  *
  * 화면에 띄울 한 줄은 (항목, 지표) 한 쌍으로 정해진다.
- *   항목(entry) — "Claude 전체" / "claude-sonnet-5" / "우리 회사 키" / "Vercel 프로젝트 A"
- *   지표(metric) — "비용" / "총 토큰" / "요청·실행" …
- * 이 조합이면 "클로드 토큰", "버셀 비용", "특정 API 키의 출력 토큰" 이 전부
+ *   항목(entry) — "Claude 전체" / "claude-sonnet-5" / "○○법무법인 챗봇" / "GPT 전체"
+ *   지표(metric) — "비용" / "총 토큰" / "요청" …
+ * 이 조합이면 "클로드 토큰", "GPT 비용", "특정 API 키의 출력 토큰" 이 전부
  * 같은 규칙 하나로 표현된다.
  */
 
@@ -41,7 +41,7 @@ export type LiveEntry = {
 };
 
 export type LiveGroup = {
-  /** "total" | "model" | "key" | "project" */
+  /** "total" | "model" | "alt" */
   key: string;
   label: string;
   entries: LiveEntry[];
@@ -52,7 +52,7 @@ export type LiveService = {
   label: string;
   /** 이 서비스가 말하는 "오늘" (YYYY-MM-DD) */
   date: string;
-  /** 하루를 끊는 기준. 예: "KST", "미 태평양시", "UTC" */
+  /** 하루를 끊는 기준. **AI 벤더는 전부 "KST"** — 다른 값이 나오면 전제가 깨진 것이다. */
   boundary: string;
   boundaryNote: string;
   /** 이 서비스 숫자가 몇 분 단위로 갱신되는지에 대한 한 줄 설명 */
@@ -65,6 +65,8 @@ export type LiveService = {
   /** 선택창이 기본으로 노출할 지표. 나머지는 "지표 전체" 를 켜야 보인다. */
   primaryMetric: string;
   groups: LiveGroup[];
+  /** 실응답으로 검증되지 않은 벤더면 그 경고. 미니 창에도 그대로 띄운다. */
+  unverified?: string;
   /** 조회 실패 시 사유. 있으면 groups 는 비어 있다. */
   error?: string;
 };
@@ -118,6 +120,7 @@ export function findEntry(
 export const DEFAULT_LINES: LiveLine[] = [
   { service: "claude", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "Claude 전체" },
   { service: "claude", entryId: "total", metricKey: "totalTokens", fallbackLabel: "Claude 전체" },
-  { service: "vercel", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "Vercel 전체" },
-  { service: "supabase", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "Supabase 전체" },
+  // GPT 키를 안 넣었으면 그 서비스가 스냅샷에 아예 없다. 줄은 "—" 로 뜨고,
+  // 선택창에서 지우면 된다. 기본값에 넣어 두는 편이 "붙이면 바로 보인다".
+  { service: "gpt", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "GPT 전체" },
 ];

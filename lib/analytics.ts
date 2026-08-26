@@ -189,7 +189,7 @@ export type BreakdownRow = {
 
 /** `computeBreakdown` 이 어느 축을 집계할지 고르는 셀렉터. */
 export const BREAKDOWN_AXES = {
-  /** 기본 축 — Claude 는 모델별, Vercel 은 프로젝트별. */
+  /** 기본 축 — 두 벤더 모두 모델별. */
   primary: (p: DailyPoint) => p.items,
   /** 보조 축 — Claude 의 API 키(거래처 서비스)별. 없는 서비스는 빈 배열. */
   alt: (p: DailyPoint) => p.altItems ?? [],

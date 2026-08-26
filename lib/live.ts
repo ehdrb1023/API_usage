@@ -1,43 +1,28 @@
 /**
  * 미니 위젯(/mini)이 1분마다 받아 가는 "오늘" 스냅샷.
  *
- * ── 세 서비스의 "오늘" 이 서로 다르다 ──────────────────────────────────────
- *   Claude    KST 오늘 (00:00 KST = 15:00 UTC). 1시간 버킷을 모아 정확히 재구성.
- *   Vercel    미 태평양시 오늘. charge 자체가 PT 자정으로 끊겨 나와서 KST 로 자를
- *             방법이 없다. 억지로 환산하는 대신 PT 기준임을 화면에 적는다.
- *   Supabase  UTC 오늘. 사용량 버킷이 1day 고정이라 역시 자를 수 없다.
+ * ── 모든 서비스의 "오늘" 이 같다 ──────────────────────────────────────────
+ * **KST 오늘** (00:00 KST = 15:00 UTC). AI 벤더는 사용량을 1시간 버킷으로 주므로
+ * 정확히 재구성된다. 예전에는 Vercel(미 태평양시)·Supabase(UTC)가 섞여 있어서
+ * 줄마다 기준 배지를 달아야 했지만, AI API 만 다루기로 하면서 그 복잡도가 사라졌다.
  *
- * 세 개를 전부 "KST 오늘" 이라고 우기는 편이 화면은 깔끔하지만, 그건 없는 정확도를
- * 지어내는 것이다. 각 줄에 기준을 배지로 달아 두고 무엇이 KST 인지 명시한다.
- *
- * ── 갱신 주기도 서로 다르다 ────────────────────────────────────────────────
- *   Claude    1분. usage_report 는 진행 중인 시간 버킷도 돌려준다.
- *   Vercel    하루 1회. 원본 charge 가 조회 구간에서 24MB 라 분당 호출은 불가능하고,
- *             애초에 하루 단위로만 갱신된다.
- *   Supabase  하루 1회. 분당 60요청 제한 + 1day 버킷.
+ * ── 오늘 비용은 추정치다 ──────────────────────────────────────────────────
+ * 토큰은 실측이고 비용만 추정이다. 두 벤더 모두 비용 리포트가 UTC 하루 단위라
+ * KST 오늘로 자를 수 없어서, 하루 캐시에서 역산해 둔 단가를 오늘 토큰에 곱한다.
+ * 단가를 매 분 다시 구하지 않는 것이 핵심이다 — 그러면 분당 벤더 호출이 배로 뛴다.
  *
  * 서버 전용이다 (API 키·fs). 클라이언트에서 import 금지 — 타입은 lib/live-types.ts.
  */
 
-import {
-  ANTHROPIC_METRICS,
-  ANTHROPIC_PRIMARY_METRIC,
-  adaptAnthropic,
-  type AnthropicRaw,
-  type UsageResult,
-} from "@/lib/adapters/anthropic";
-import { SUPABASE_METRICS, SUPABASE_PRIMARY_METRIC } from "@/lib/adapters/supabase";
-import { VERCEL_METRICS, VERCEL_PRIMARY_METRIC } from "@/lib/adapters/vercel";
-import { estimateCostResults } from "@/lib/anthropic-rates";
+import { buildDailyPoints, type UsageRow } from "@/lib/adapters/core";
 import { loadClientKeyNames } from "@/lib/client-keys";
-import type { Fresh } from "@/lib/vendor-fallback";
 import {
-  getAnthropicDaily,
-  getAnthropicHourly,
   getDataSourceMode,
-  getServiceSeries,
+  getTodayUsage,
+  getVendorDays,
   liveRefreshSeconds,
 } from "@/lib/data-source";
+import { buildKstToday } from "@/lib/kst-days";
 import { kstDay, kstTime, kstTodayWindow } from "@/lib/kst";
 import {
   COST_METRIC_KEY,
@@ -47,48 +32,49 @@ import {
   type LiveService,
   type LiveSnapshot,
 } from "@/lib/live-types";
-import type { BreakdownItem, DailyPoint, MetricSpec, ServiceId } from "@/lib/types";
+import { enabledServices, type ServiceDefinition } from "@/lib/services";
+import type { BreakdownItem, DailyPoint, MetricSpec } from "@/lib/types";
 
 const COST_SPEC: LiveMetricSpec = {
   key: COST_METRIC_KEY,
   label: "비용",
   format: "usd",
+  // 비용은 언제나 추정치다 (위 주석 참고). 화면에 ~ 가 붙는다.
+  estimated: true,
 };
 
 export async function getLiveSnapshot(now: Date = new Date()): Promise<LiveSnapshot> {
-  const [claude, vercel, supabase] = await Promise.all([
-    guard("claude", "Claude", () => getClaudeLive(now)),
-    guard("vercel", "Vercel", () => getVendorDayLive("vercel")),
-    guard("supabase", "Supabase", () => getVendorDayLive("supabase")),
-  ]);
+  const mode = getDataSourceMode();
+  const services = await Promise.all(
+    enabledServices(mode).map((service) => guard(service, now)),
+  );
 
   return {
     updatedAt: now.toISOString(),
     kstDate: kstDay(now),
     kstTime: kstTime(now),
-    source: getDataSourceMode(),
+    source: mode,
     // 폴링 주기를 클라이언트가 정하면 서버 캐시 구간과 어긋난다. 서버가 정해 준다.
     refreshSeconds: liveRefreshSeconds(),
-    services: [claude, vercel, supabase],
+    services,
   };
 }
 
 /** 한 서비스가 죽어도 나머지 줄은 계속 보여야 한다 (getAllSeries 와 같은 원칙). */
 async function guard(
-  id: ServiceId,
-  label: string,
-  build: () => Promise<LiveService>,
+  service: ServiceDefinition,
+  now: Date,
 ): Promise<LiveService> {
   try {
-    return await build();
+    return await buildLiveService(service, now);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[live] ${id} 조회 실패`, message);
+    console.warn(`[live] ${service.id} 조회 실패`, message);
     return {
-      id,
-      label,
+      id: service.id,
+      label: service.label,
       date: "",
-      boundary: "—",
+      boundary: "KST",
       boundaryNote: "",
       freshness: "",
       primaryMetric: COST_METRIC_KEY,
@@ -99,103 +85,72 @@ async function guard(
   }
 }
 
-// ---------------------------------------------------------------- Claude (KST)
-
 /**
  * KST 오늘 = 1시간 버킷을 모은 것. 비용만 단가 역산으로 얹는다.
  *
- * 시간 버킷을 **cost_report 모양과 함께 하나의 하루 버킷으로 위조해서**
- * 기존 `adaptAnthropic()` 에 그대로 통과시킨다. 모델별 집계·키별 비용 안분·
- * 키 이름 매핑이 전부 거기 있어서, KST 전용 집계 코드를 새로 쓰면 같은 로직이
- * 두 벌이 되고 둘이 어긋나기 시작한다.
+ * 하루 버킷 하나를 만들어 **본문 대시보드와 똑같은 집계 함수**에 통과시킨다.
+ * 모델별 집계·보조 축 비용 안분·키 이름 매핑이 전부 거기 있어서, 미니 위젯 전용
+ * 집계 코드를 새로 쓰면 같은 로직이 두 벌이 되고 둘이 어긋나기 시작한다.
  */
-async function getClaudeLive(now: Date): Promise<LiveService> {
+async function buildLiveService(
+  service: ServiceDefinition,
+  now: Date,
+): Promise<LiveService> {
   const window = kstTodayWindow(now);
   const mode = getDataSourceMode();
   const refreshSeconds = liveRefreshSeconds();
 
-  const [dailyFresh, clientKeyNames] = await Promise.all([
-    getAnthropicDaily(),
+  const [daysFresh, clientKeyNames] = await Promise.all([
+    getVendorDays(service.id),
     loadClientKeyNames(),
   ]);
-  // 단가는 하루 캐시에서 이미 역산돼 온다. 매 분 다시 계산할 이유가 없다.
-  const { raw: daily, rates } = dailyFresh.value;
+  // 단가·키 목록은 하루 캐시에서 이미 나와 있다. 매 분 다시 구할 이유가 없다.
+  const { days, rates, keys } = daysFresh.value;
 
-  const hourly =
+  const today =
     mode === "mock"
-      ? ({
-          value: mockHourlyStandIn(daily),
-          at: Date.now(),
-          stale: false,
-        } as Fresh<unknown>)
-      : ((await getAnthropicHourly(window.from, window.to)) as Fresh<unknown>);
+      ? { value: mockTodayStandIn(days), at: Date.now(), stale: false as const }
+      : await getTodayUsage(service.id, window.from, window.to);
 
-  const usageResults =
-    mode === "mock"
-      ? (hourly.value as UsageResult[])
-      : (hourly.value as { results: UsageResult[] }[]).flatMap((b) => b.results);
-
-
-  const synthetic: AnthropicRaw = {
-    // starting_at 의 앞 10글자가 곧 날짜다 — KST 날짜를 그대로 박아 넣는다.
-    usage_report: {
-      data: [
-        {
-          starting_at: `${window.date}T00:00:00Z`,
-          ending_at: `${window.date}T23:59:59Z`,
-          results: usageResults,
-        },
-      ],
-    },
-    cost_report: {
-      data: [
-        {
-          starting_at: `${window.date}T00:00:00Z`,
-          ending_at: `${window.date}T23:59:59Z`,
-          results: estimateCostResults(usageResults, rates),
-        },
-      ],
-    },
-    api_keys: daily.api_keys,
-  };
-
-  const point = adaptAnthropic(synthetic, { clientKeyNames })[0];
+  const build = { ...service.build, keys, clientKeyNames };
+  const point = buildDailyPoints(
+    [buildKstToday(window.date, today.value, rates)],
+    build,
+  )[0];
 
   /**
    * 선택창에는 **오늘 안 쓴 키·모델도** 떠야 한다. 지금 0 인 거래처를 골라 두고
    * 언제 쓰기 시작하는지 보는 게 이 위젯의 용도 중 하나이기 때문이다.
    * 그래서 조회 구간 전체에서 한 번이라도 등장한 항목을 0 으로 채워 붙인다.
    */
-  const history = adaptAnthropic(daily, { clientKeyNames });
-  const metricKeys = ANTHROPIC_METRICS.map((m) => m.key);
+  const history = buildDailyPoints(days, build);
+  const metricKeys = service.metricSpecs.map((m) => m.key);
 
   return {
-    id: "claude",
-    label: "Claude",
+    id: service.id,
+    label: service.label,
     date: window.date,
     boundary: "KST",
     boundaryNote: `한국시간 ${window.date} 00:00 부터 지금까지 (매일 자정 리셋)`,
-    freshness: hourly.stale
-      ? `갱신 실패 — ${new Date(hourly.at).toISOString().slice(11, 16)}Z 값입니다. ` +
-        `사유: ${hourly.reason ?? "알 수 없음"}`
+    freshness: today.stale
+      ? `갱신 실패 — ${new Date(today.at).toISOString().slice(11, 16)}Z 값입니다. ` +
+        `사유: ${today.reason ?? "알 수 없음"}`
       : `${refreshSeconds}초마다 갱신 · 토큰은 실측, 비용은 추정`,
-    stale: hourly.stale,
-    asOf: new Date(hourly.at).toISOString(),
-    primaryMetric: ANTHROPIC_PRIMARY_METRIC,
-    metricSpecs: [
-      { ...COST_SPEC, estimated: true },
-      ...toLiveSpecs(ANTHROPIC_METRICS),
-    ],
+    stale: today.stale,
+    asOf: new Date(today.at).toISOString(),
+    primaryMetric: service.primaryMetric,
+    metricSpecs: [COST_SPEC, ...toLiveSpecs(service.metricSpecs)],
+    unverified: service.unverified,
     groups: [
       totalGroup(point),
       {
         key: "model",
-        label: "모델별",
+        label: `${service.breakdownLabel}별`,
         entries: withCatalog(entries(point?.items), catalog(history, "items"), metricKeys),
       },
       {
-        key: "key",
-        label: "API 키별",
+        key: "alt",
+        label: `${service.altBreakdown.label}별`,
         entries: withCatalog(entries(point?.altItems), catalog(history, "altItems"), metricKeys),
       },
     ],
@@ -203,94 +158,11 @@ async function getClaudeLive(now: Date): Promise<LiveService> {
 }
 
 /**
- * 목업 모드용. mock/anthropic-usage.json 에는 시간 버킷이 없으니 **가장 최근 날짜**의
- * 일 버킷을 "오늘" 인 척 쓴다. 화면 배치를 보려고 있는 경로라 정확도는 상관없다.
+ * 목업 모드용. 목업에는 1시간 버킷이 없으니 **가장 최근 날짜**의 하루치를
+ * "오늘" 인 척 쓴다. 화면 배치를 보려고 있는 경로라 정확도는 상관없다.
  */
-function mockHourlyStandIn(raw: AnthropicRaw): UsageResult[] {
-  const buckets = raw.usage_report?.data ?? [];
-  const last = buckets[buckets.length - 1];
-  return (last?.results ?? []) as UsageResult[];
-}
-
-// ---------------------------------------------- Vercel · Supabase (벤더 기준일)
-
-const VENDOR_DAY: Record<
-  "vercel" | "supabase",
-  {
-    boundary: string;
-    boundaryNote: string;
-    freshness: string;
-    specs: MetricSpec[];
-    primary: string;
-  }
-> = {
-  vercel: {
-    boundary: "PT",
-    boundaryNote:
-      "Vercel 은 미 태평양시 자정(KST 오후 4시)에 하루가 바뀝니다. KST 하루로 자를 수 없습니다.",
-    freshness: "하루 1회 갱신 (원본 charge 가 커서 분당 호출 불가)",
-    specs: VERCEL_METRICS,
-    primary: VERCEL_PRIMARY_METRIC,
-  },
-  supabase: {
-    boundary: "UTC",
-    boundaryNote:
-      "Supabase 사용량 버킷은 UTC 자정(KST 오전 9시) 기준이며 1일 단위로만 나옵니다.",
-    freshness: "하루 1회 갱신 · 비용은 플랜 요금 일할 추정치",
-    specs: SUPABASE_METRICS,
-    primary: SUPABASE_PRIMARY_METRIC,
-  },
-};
-
-async function getVendorDayLive(id: "vercel" | "supabase"): Promise<LiveService> {
-  const series = await getServiceSeries(id);
-  if (series.points.length === 0 && series.note) {
-    throw new Error(series.note);
-  }
-
-  // points 는 날짜 오름차순이라 마지막이 "오늘"(벤더 기준일)이다.
-  const point = series.points[series.points.length - 1];
-  const meta = VENDOR_DAY[id];
-
-  const metricKeys = meta.specs.map((m) => m.key);
-  const groups: LiveGroup[] = [
-    totalGroup(point),
-    {
-      key: "project",
-      label: `${series.breakdownLabel}별`,
-      entries: withCatalog(
-        entries(point?.items),
-        catalog(series.points, "items"),
-        metricKeys,
-      ),
-    },
-  ];
-  if (series.points.some((p) => p.altItems?.length)) {
-    groups.push({
-      key: "alt",
-      label: `${series.altBreakdown?.label ?? "보조"}별`,
-      entries: withCatalog(
-        entries(point?.altItems),
-        catalog(series.points, "altItems"),
-        metricKeys,
-      ),
-    });
-  }
-
-  return {
-    id,
-    label: series.label,
-    date: point?.date ?? "",
-    boundary: meta.boundary,
-    boundaryNote: meta.boundaryNote,
-    freshness: meta.freshness,
-    primaryMetric: meta.primary,
-    metricSpecs: [
-      { ...COST_SPEC, estimated: id === "supabase" },
-      ...toLiveSpecs(meta.specs),
-    ],
-    groups,
-  };
+function mockTodayStandIn(days: { usage: UsageRow[] }[]): UsageRow[] {
+  return days[days.length - 1]?.usage ?? [];
 }
 
 // ---------------------------------------------------------------- 공통 변환
@@ -329,10 +201,7 @@ function entries(items: BreakdownItem[] | undefined): LiveEntry[] {
 }
 
 /** 조회 구간 전체에서 한 번이라도 등장한 항목 목록 (중복 제거, 라벨은 첫 등장 기준). */
-function catalog(
-  points: DailyPoint[],
-  axis: "items" | "altItems",
-): LiveEntry[] {
+function catalog(points: DailyPoint[], axis: "items" | "altItems"): LiveEntry[] {
   const seen = new Map<string, LiveEntry>();
   for (const p of points) {
     for (const item of p[axis] ?? []) {

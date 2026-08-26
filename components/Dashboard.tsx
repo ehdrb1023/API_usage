@@ -44,7 +44,7 @@ export default function Dashboard({ series, mode }: Props) {
 
   const view = useMemo(() => {
     const anchor = anchorDate(active.points);
-    // 보조 축이 없는 서비스(Vercel)로 넘어가면 선택은 의미가 없다.
+    // 보조 축이 없는 탭(조회 실패한 빈 탭)에서는 선택이 의미가 없다.
     const focusKey = active.altBreakdown ? selectedKey : null;
     /**
      * 선택된 키가 있으면 KPI·차트·일별 상세만 그 키 기준으로 다시 계산한다.
@@ -134,39 +134,14 @@ export default function Dashboard({ series, mode }: Props) {
       )}
 
       {/*
-        일 경계 경고는 KPI·차트 **위**에 둔다. 각주에 두면 Vercel 탭 기준 5화면을
-        스크롤해야 보이는데, 정작 오해가 생기는 지점은 탭을 전환한 직후 상단이다.
-        두 서비스의 기준이 실제로 다를 때만 띄운다.
+        예전에는 여기에 "서비스마다 일 경계가 다릅니다" 경고 배너가 있었다.
+        Vercel(미 태평양시)·Supabase(UTC)를 함께 보던 때의 이야기고, AI API 만
+        다루기로 하면서 **모든 탭이 KST 자정 기준**이 되어 배너가 필요 없어졌다.
+
+        ⚠️ 1시간 버킷을 안 주는 벤더를 추가하면 그 전제가 깨진다. 그때는 이 배너를
+           되살릴 것 — 기준이 다른데 같은 날짜로 보이면 조용히 틀린 비교가 된다.
+           (판단 근거는 lib/types.ts 의 DayBoundary 주석)
       */}
-      {new Set(series.map((s) => s.dayBoundary.label)).size > 1 && (
-        <div
-          role="note"
-          className="mb-6 flex gap-2.5 rounded-lg border px-3.5 py-2.5 text-xs"
-          style={{
-            borderColor: "var(--status-critical)",
-            background: "color-mix(in srgb, var(--status-critical) 7%, transparent)",
-            color: "var(--text-secondary)",
-          }}
-        >
-          <span aria-hidden="true" style={{ color: "var(--status-critical)" }}>
-            ⚠
-          </span>
-          <p>
-            <strong style={{ color: "var(--text-primary)" }}>
-              서비스마다 일 경계가 다릅니다
-            </strong>{" "}
-            —{" "}
-            {series.map((s, i) => (
-              <span key={s.service}>
-                {i > 0 && " · "}
-                {s.label} {s.dayBoundary.label}
-              </span>
-            ))}
-            . 같은 날짜라도 가리키는 24시간이 서로 어긋나므로, 기준이 다른 탭의 일별 수치를
-            같은 하루로 놓고 비교하지 마세요.
-          </p>
-        </div>
-      )}
 
       {/* 키 기준 집계의 한계는 표를 보기 전에 알아야 해서 상단에 둔다. */}
       {active.altBreakdown?.notice && !view.focusKey && (
@@ -258,13 +233,10 @@ export default function Dashboard({ series, mode }: Props) {
         style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
       >
         비용은 USD 기준. {active.dayBoundary.note}
-        {active.service === "claude" && " Claude 비용은 cost_report 의 센트 단위 값을 USD 로 변환한 값입니다."}
-        {active.service === "vercel" && " Vercel 비용은 EffectiveCost(크레딧·할인 반영 실질 원가) 합계입니다. Committed 플랜은 BilledCost 가 0 으로 잡혀 실사용이 보이지 않습니다."}
 
         {/*
-          ServiceSeries.note 는 타입에만 있고 화면에 안 나오고 있었다. Supabase 를
-          붙이면서 문제가 됐다 — 그 탭의 비용은 추정치인데 그 사실을 적어 둘 곳이
-          여기뿐이고, 조회에 실패한 탭도 사유를 여기로 내보낸다.
+          벤더별 주의문·미검증 경고·조회 실패 사유가 전부 note 로 온다
+          (조립은 lib/data-source.ts 의 composeNote).
           줄바꿈을 살려야 실패 사유(발급 절차)가 읽힌다.
         */}
         {active.note && (
