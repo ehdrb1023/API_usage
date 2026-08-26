@@ -32,7 +32,7 @@ export class MissingCredentialError extends Error {
 
 /** 요청은 나갔지만 2xx 가 아닌 응답이 온 경우. */
 export class ApiClientError extends Error {
-  readonly vendor: "anthropic" | "vercel" | "supabase";
+  readonly vendor: "anthropic" | "openai" | "vercel" | "supabase";
   readonly status: number;
   /** 응답 본문 원문 (JSON 파싱 실패 대비해 문자열로 보관). */
   readonly body: string;
@@ -50,7 +50,7 @@ export class ApiClientError extends Error {
   readonly retryAfterSeconds?: number;
 
   constructor(args: {
-    vendor: "anthropic" | "vercel" | "supabase";
+    vendor: "anthropic" | "openai" | "vercel" | "supabase";
     status: number;
     body: string;
     url: string;
@@ -610,4 +610,149 @@ export interface SupabaseErrorResponse {
   error?: string;
   /** 일부 엔드포인트는 이 형태로 옵니다. */
   msg?: string;
+}
+
+// ============================================================================
+// OpenAI — Admin 사용량 / 비용
+// ============================================================================
+//
+// ⚠️⚠️ 이 블록 전체가 **공개 문서 기준이고 실응답으로 검증되지 않았습니다.**
+//      실 키가 생기면 docs/openai-integration.md 의 순서대로 확인하세요.
+//
+// Anthropic 과 헷갈리기 쉬운 차이 세 가지:
+//   1. 경로가 **단수** — /v1/organization/… (Anthropic 은 organizations)
+//   2. 시각이 **unix 초 정수** — start_time=1756080000 (Anthropic 은 ISO 문자열)
+//   3. 금액이 **USD 실수** — amount.value (Anthropic 은 센트 문자열)
+
+/** usage/completions 는 세 해상도를 다 지원한다 (Anthropic 과 같다). */
+export type OpenAiBucketWidth = "1m" | "1h" | "1d";
+
+/** costs 는 **1d 뿐**이다. 그래서 KST 하루 비용은 단가 역산이 필요하다. */
+export type OpenAiCostBucketWidth = "1d";
+
+export type OpenAiUsageGroupBy =
+  | "project_id"
+  | "user_id"
+  | "api_key_id"
+  | "model"
+  | "batch";
+
+/** ⚠️ costs 는 model 로 group_by 할 수 없다. Anthropic cost_report 와 같은 제약. */
+export type OpenAiCostGroupBy = "project_id" | "line_item";
+
+export interface OpenAiPage<TBucket> {
+  object: "page";
+  data: TBucket[];
+  has_more: boolean;
+  /** 다음 페이지 커서. `page` 파라미터로 되돌려 보낸다. */
+  next_page: string | null;
+}
+
+export interface OpenAiUsageResult {
+  object: "organization.usage.completions.result";
+  /** ⚠️ `input_cached_tokens` 를 **포함한** 총 입력. 어댑터에서 빼서 정규화한다. */
+  input_tokens: number;
+  input_cached_tokens?: number;
+  output_tokens: number;
+  num_model_requests?: number;
+  project_id?: string | null;
+  user_id?: string | null;
+  api_key_id?: string | null;
+  model?: string | null;
+  batch?: boolean | null;
+}
+
+export interface OpenAiUsageBucket {
+  object: "bucket";
+  /** unix 초. */
+  start_time: number;
+  end_time: number;
+  results: OpenAiUsageResult[];
+}
+
+export type OpenAiUsageResponse = OpenAiPage<OpenAiUsageBucket>;
+
+export interface OpenAiUsageParams {
+  /** unix 초. **필수.** */
+  start_time: number;
+  end_time?: number;
+  bucket_width?: OpenAiBucketWidth;
+  group_by?: OpenAiUsageGroupBy[];
+  project_ids?: string[];
+  api_key_ids?: string[];
+  models?: string[];
+  /** 버킷 개수. 1h 는 최대 168(=7일)로 알려져 있으나 ⚠️ 미검증. */
+  limit?: number;
+  page?: string;
+}
+
+export interface OpenAiCostAmount {
+  /** ⚠️ **USD 실수.** 100 으로 나누지 말 것. */
+  value: number;
+  currency: string;
+}
+
+export interface OpenAiCostResult {
+  object: "organization.costs.result";
+  amount: OpenAiCostAmount;
+  /** 예: "gpt-4o-2024-08-06, input". ⚠️ 실제 형식 미검증. */
+  line_item?: string | null;
+  project_id?: string | null;
+}
+
+export interface OpenAiCostBucket {
+  object: "bucket";
+  start_time: number;
+  end_time: number;
+  results: OpenAiCostResult[];
+}
+
+export type OpenAiCostsResponse = OpenAiPage<OpenAiCostBucket>;
+
+export interface OpenAiCostsParams {
+  start_time: number;
+  end_time?: number;
+  bucket_width?: OpenAiCostBucketWidth;
+  group_by?: OpenAiCostGroupBy[];
+  project_ids?: string[];
+  /** ⚠️ 기본 7 / 최대 180 으로 알려져 있다. 기본값이면 8일째부터 조용히 잘린다. */
+  limit?: number;
+  page?: string;
+}
+
+export type OpenAiProjectStatus = "active" | "archived";
+
+export interface OpenAiProject {
+  id: string;
+  object: "organization.project";
+  name: string;
+  created_at: number;
+  archived_at?: number | null;
+  status: OpenAiProjectStatus;
+}
+
+export interface OpenAiProjectsResponse {
+  object: "list";
+  data: OpenAiProject[];
+  first_id?: string | null;
+  last_id?: string | null;
+  has_more: boolean;
+}
+
+/** ⚠️ 프로젝트 목록은 리포트와 **페이지네이션 방식이 다르다** (after + limit). */
+export interface OpenAiListProjectsParams {
+  limit?: number;
+  after?: string;
+  /** 보관된 프로젝트도 포함할지. 과거 사용량에는 보관된 프로젝트도 나온다. */
+  include_archived?: boolean;
+}
+
+/** OpenAI 표준 에러 봉투. */
+export interface OpenAiErrorResponse {
+  error: {
+    message: string;
+    type: string;
+    param?: string | null;
+    code?: string | null;
+  };
 }
