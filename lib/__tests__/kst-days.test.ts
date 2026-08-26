@@ -1,10 +1,11 @@
 /**
- * lib/anthropic-kst.ts 유닛 테스트 — 순수 함수라 네트워크를 타지 않습니다.
+ * lib/kst-days.ts 유닛 테스트 — 순수 함수라 네트워크를 타지 않습니다.
  *
  * 지키려는 것:
  *   1. UTC 15:00 버킷은 **다음 KST 날짜**로 넘어간다 (하루 경계가 여기다)
- *   2. 단가는 **실측 cost_report** 에서만 뽑는다 (재구성한 추정치로 되먹이면 순환)
+ *   2. 단가는 **실측 비용** 에서만 뽑는다 (재구성한 추정치로 되먹이면 순환)
  *   3. 재구성해도 구간 전체 비용 합계는 보존된다
+ *   4. KST 오늘은 사용량이 비어도 하루가 사라지지 않는다
  *
  * 실행:
  *   node --import ./lib/clients/__tests__/ts-resolve.mjs --test "lib/**\/__tests__/*.test.ts"
@@ -13,8 +14,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { adaptAnthropic, type UsageResult } from "@/lib/adapters/anthropic";
-import { buildKstDays } from "@/lib/anthropic-kst";
+import {
+  ANTHROPIC_BUILD,
+  toCostRows,
+  toUsageRows,
+  type UsageResult,
+} from "@/lib/adapters/anthropic";
+import { buildDailyPoints } from "@/lib/adapters/core";
+import { buildKstDays, buildKstToday } from "@/lib/kst-days";
 
 const MTOK = 1_000_000;
 
@@ -29,16 +36,15 @@ function usage(model: string, apiKeyId: string, output: number): UsageResult {
   };
 }
 
-function hour(startingAt: string, results: UsageResult[]) {
-  return { starting_at: startingAt, results };
+function hour(startedAt: string, results: UsageResult[]) {
+  return { startedAt, usage: toUsageRows(results) };
 }
 
-/** sonnet-5 출력 토큰 $15/MTok 을 깔아 둔다 (센트 문자열). */
+/** sonnet-5 출력 토큰 $15/MTok 을 깔아 둔다 (원본은 센트 문자열). */
 function costDay(date: string, usd: number) {
   return {
-    starting_at: `${date}T00:00:00Z`,
-    ending_at: `${date}T00:00:00Z`,
-    results: [
+    date,
+    cost: toCostRows([
       {
         amount: String(usd * 100),
         currency: "USD",
@@ -46,23 +52,25 @@ function costDay(date: string, usd: number) {
         description: null,
         token_type: "output_tokens",
       },
-    ],
+    ]),
   };
 }
 
+const THREE_HOURS = [
+  hour("2026-08-24T14:00:00Z", [usage("claude-sonnet-5", "key_a", 1 * MTOK)]),
+  hour("2026-08-24T15:00:00Z", [usage("claude-sonnet-5", "key_a", 2 * MTOK)]),
+  hour("2026-08-25T14:00:00Z", [usage("claude-sonnet-5", "key_a", 4 * MTOK)]),
+];
+
 describe("buildKstDays", () => {
   it("UTC 15:00 을 경계로 KST 날짜가 넘어간다", () => {
-    const { raw } = buildKstDays({
-      hourly: [
-        hour("2026-08-24T14:00:00Z", [usage("claude-sonnet-5", "key_a", 1 * MTOK)]),
-        hour("2026-08-24T15:00:00Z", [usage("claude-sonnet-5", "key_a", 2 * MTOK)]),
-        hour("2026-08-25T14:00:00Z", [usage("claude-sonnet-5", "key_a", 4 * MTOK)]),
-      ],
-      // 실측 비용: 총 7M 출력 토큰에 $105 → $15/MTok
+    // 실측 비용: 총 7M 출력 토큰에 $105 → $15/MTok
+    const { days } = buildKstDays({
+      hourly: THREE_HOURS,
       cost: [costDay("2026-08-24", 105)],
     });
 
-    const points = adaptAnthropic(raw);
+    const points = buildDailyPoints(days, ANTHROPIC_BUILD);
     assert.deepEqual(
       points.map((p) => p.date),
       ["2026-08-24", "2026-08-25"],
@@ -73,16 +81,12 @@ describe("buildKstDays", () => {
   });
 
   it("KST 로 다시 나눠도 구간 전체 비용은 보존된다", () => {
-    const { raw } = buildKstDays({
-      hourly: [
-        hour("2026-08-24T14:00:00Z", [usage("claude-sonnet-5", "key_a", 1 * MTOK)]),
-        hour("2026-08-24T15:00:00Z", [usage("claude-sonnet-5", "key_a", 2 * MTOK)]),
-        hour("2026-08-25T14:00:00Z", [usage("claude-sonnet-5", "key_a", 4 * MTOK)]),
-      ],
+    const { days } = buildKstDays({
+      hourly: THREE_HOURS,
       cost: [costDay("2026-08-24", 105)],
     });
 
-    const points = adaptAnthropic(raw);
+    const points = buildDailyPoints(days, ANTHROPIC_BUILD);
     const total = points.reduce((s, p) => s + p.costUsd, 0);
     assert.ok(Math.abs(total - 105) < 1e-6, `합계 ${total}`);
     // 날짜별로도 단가 × 토큰이 맞아야 한다.
@@ -106,17 +110,42 @@ describe("buildKstDays", () => {
   });
 
   it("사용량이 없으면 빈 시리즈다 (버킷을 지어내지 않는다)", () => {
-    const { raw } = buildKstDays({ hourly: [], cost: [] });
-    assert.equal(raw.usage_report.data.length, 0);
-    assert.equal(raw.cost_report.data.length, 0);
+    const { days } = buildKstDays({ hourly: [], cost: [] });
+    assert.equal(days.length, 0);
+  });
+});
+
+describe("buildKstToday", () => {
+  it("사용량이 비어도 오늘 하루는 남는다 (KST 자정 직후)", () => {
+    const { rates } = buildKstDays({
+      hourly: THREE_HOURS,
+      cost: [costDay("2026-08-24", 105)],
+    });
+
+    const point = buildDailyPoints(
+      [buildKstToday("2026-08-26", [], rates)],
+      ANTHROPIC_BUILD,
+    )[0];
+
+    // 자정 직후에 "오늘" 줄이 통째로 사라지면 미니 위젯이 빈 화면이 된다.
+    assert.equal(point.date, "2026-08-26");
+    assert.equal(point.costUsd, 0);
+    assert.equal(point.metrics.totalTokens, 0);
   });
 
-  it("API 키 목록을 그대로 실어 보낸다 (키 이름 매핑에 필요)", () => {
-    const { raw } = buildKstDays({
-      hourly: [],
-      cost: [],
-      apiKeys: [{ id: "apikey_1", name: "brief", status: "active" }],
+  it("오늘 사용량에 하루 캐시의 단가를 그대로 곱한다", () => {
+    const { rates } = buildKstDays({
+      hourly: THREE_HOURS,
+      cost: [costDay("2026-08-24", 105)],
     });
-    assert.equal(raw.api_keys?.[0].name, "brief");
+
+    const today = buildKstToday(
+      "2026-08-26",
+      toUsageRows([usage("claude-sonnet-5", "key_a", 3 * MTOK)]),
+      rates,
+    );
+    const point = buildDailyPoints([today], ANTHROPIC_BUILD)[0];
+
+    assert.ok(Math.abs(point.costUsd - 45) < 1e-6, `비용 ${point.costUsd}`);
   });
 });
