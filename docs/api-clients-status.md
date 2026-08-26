@@ -1,13 +1,13 @@
 # API 클라이언트 준비 상태
 
-> **한 줄 요약:** `lib/clients/` 에 Anthropic Admin API·Vercel Billing API·Supabase
-> Management API 클라이언트를 타입·에러 처리·테스트까지 갖춰 넣어 뒀고,
-> **2026-08-14 실제 키로 Anthropic·Vercel 4개 엔드포인트 모두 200 을 받아 §3 체크리스트를
-> 대부분 소진했습니다.** `lib/data-source.ts` 도 이 클라이언트로 교체 완료.
-> **Supabase 는 2026-08-25 에 추가했고 아직 실키 검증 전입니다 — §3-8 참고.**
+> **범위: AI API 만** (2026-08-26 확정). Vercel·Supabase 클라이언트와 그 검증 기록은
+> 같은 날 삭제했습니다 — 인프라 비용은 이 대시보드가 다루지 않습니다.
 >
-> 작성일 2026-08-14 · 실키 검증 2026-08-14 · Supabase 추가 2026-08-25 ·
-> 스키마 출처는 각 파일 상단 주석 참고
+> **한 줄 요약:** Anthropic Admin API 는 **2026-08-14 실키로 4개 엔드포인트 200 을 받아
+> §3 체크리스트를 소진**했습니다. OpenAI 는 **자리만 마련된 상태**이고 확인 절차는
+> 별도 문서 `docs/openai-integration.md` 에 있습니다.
+>
+> 작성일 2026-08-14 · 실키 검증 2026-08-14 · AI API 전용으로 정리 2026-08-26
 
 ---
 
@@ -15,41 +15,39 @@
 
 | 파일 | 내용 |
 |---|---|
-| `lib/clients/types.ts` | 두 API의 요청·응답 타입 전부. 불확실한 필드는 `⚠️ 실제 응답으로 검증 필요` 주석. 공통 에러 클래스 `MissingCredentialError` / `ApiClientError` 포함 |
+| `lib/clients/types.ts` | 두 벤더의 요청·응답 타입 전부. 불확실한 필드는 `⚠️` 주석. 공통 에러 클래스 `MissingCredentialError` / `ApiClientError` 포함 |
 | `lib/clients/anthropic.ts` | `usage_report/messages` + `cost_report` + `api_keys` 호출. 커서 페이지네이션(리포트)·`after_id` 페이지네이션(키 목록), 베타 헤더, 센트→USD 변환 |
-| `lib/clients/vercel.ts` | `/v1/billing/charges` (FOCUS v1.3 JSONL) 호출. 구간 검증, JSONL 파싱, 일별/프로젝트별 집계 |
+| `lib/clients/openai.ts` | `usage/completions` + `costs` + `projects` 호출. ⚠️ **실키 미검증** |
+| `lib/adapters/core.ts` | **벤더 중립 집계** — 모델별·보조축별 2축, 키 표시 이름 우선순위, 비용 안분 |
+| `lib/token-rates.ts` | **벤더 중립 단가 역산** — UTC 하루 비용 → USD/토큰 |
+| `lib/kst-days.ts` | **벤더 중립 KST 접기** — 1시간 버킷 → KST 하루 |
+| `lib/adapters/anthropic.ts` · `openai.ts` | 벤더 원본 → 공통 모델 **변환만**. 집계 로직 없음 |
+| `lib/services.ts` | 서비스 레지스트리. **벤더를 추가하는 곳은 여기 한 곳** |
 | `lib/clients/__tests__/anthropic.test.ts` | 27개 케이스 (목 응답) |
-| `lib/adapters/__tests__/anthropic.test.ts` | 13개 케이스 — 표시 이름 우선순위·겹침 구분자·두 축 합계 일치 |
-| `lib/__tests__/analytics.test.ts` | 15개 케이스 — 키별 시계열 필터, 키 기준 급증일 재계산, 기간 필터 유지 |
-| `lib/clients/__tests__/vercel.test.ts` | 20개 케이스 (목 응답) |
-| `lib/clients/supabase.ts` | `/v1/projects` + `/v1/organizations{,/slug}` + `usage.api-counts` + `/billing/addons` 호출. **계정(토큰) 여러 개를 동시에** 훑고, 계정·프로젝트 단위 실패를 격리 |
-| `lib/adapters/supabase.ts` | 요청 수 시계열 + **고정비 기반 비용 추정**. 프로젝트 축 / 계정 축 두 가지 breakdown |
-| `lib/clients/__tests__/supabase.test.ts` | 19개 케이스 — 계정 파싱·자리표시자 거부·429 재시도·부분 실패 격리 |
-| `lib/adapters/__tests__/supabase.test.ts` | 15개 케이스 — 일할 계산·플랜 요금·두 축 합계 일치 |
+| `lib/adapters/__tests__/anthropic.test.ts` | 13개 — 표시 이름 우선순위·겹침 구분자·두 축 합계 일치 |
+| `lib/adapters/__tests__/openai.test.ts` | 10개 — 캐시 포함 입력 정규화·금액 단위·총 토큰에 요청 수 미포함 |
+| `lib/__tests__/token-rates.test.ts` | 단가 역산이 공시 단가와 일치하는지, 왕복 보존 |
+| `lib/__tests__/kst-days.test.ts` | UTC 15:00 경계, 순환 참조 방지, 오늘 하루 유지 |
+| `lib/__tests__/analytics.test.ts` | 키별 시계열 필터, 키 기준 급증일 재계산 |
+| `lib/__tests__/kst.test.ts` · `vendor-fallback.test.ts` | 타임존 무관성, 429 백오프 |
 | `lib/clients/__tests__/ts-resolve.mjs` | `node --test` 가 확장자 없는 상대 import 를 해석하게 해 주는 훅 (테스트 전용) |
 
 ### 확정된 엔드포인트
 
-| | Anthropic Usage | Anthropic Cost | Vercel FOCUS Charges |
-|---|---|---|---|
-| 경로 | `GET /v1/organizations/usage_report/messages` | `GET /v1/organizations/cost_report` | `GET /v1/billing/charges` |
-| 인증 헤더 | `x-api-key` + `anthropic-version` | 동일 | `Authorization: Bearer` |
-| 응답 형식 | JSON | JSON | **JSONL** (`application/jsonl`) |
-| 비용 필드 | ❌ 없음 (토큰만) | ✅ `amount` (**센트 단위 문자열**) | ✅ `BilledCost` / `EffectiveCost` (USD number) |
-| 페이지네이션 | 커서 (`next_page`) | 커서 (`next_page`) | **없음** (전량 스트림) |
-| 시간 단위 | `1d` / `1h` / `1m` | **`1d` 만** | 1일 고정 |
-| 최대 범위 | 1d 기준 31버킷/페이지 | 명시 없음 | **1년** |
+전체 비교표는 `docs/api-response-notes.md` 0절에 있습니다. 여기서는 상태만:
 
-네 번째 엔드포인트 `GET /v1/organizations/api_keys` (List API Keys) 는 위 표에 넣지
-않았습니다 — 사용량·비용 리포트가 아니라 **`api_key_id` → 이름·상태 매핑**만 주는
-보조 엔드포인트이고, 페이지네이션도 `after_id`/`last_id` 로 혼자 다릅니다.
+| 벤더 | 엔드포인트 | 상태 |
+|---|---|---|
+| Anthropic | `GET /v1/organizations/usage_report/messages` | ✅ 2026-08-14 실키 200 |
+| Anthropic | `GET /v1/organizations/cost_report` | ✅ 실키 200 |
+| Anthropic | `GET /v1/organizations/api_keys` | ✅ 실키 200 (31개 키) |
+| OpenAI | `GET /v1/organization/usage/completions` | ⚠️ 미검증 |
+| OpenAI | `GET /v1/organization/costs` | ⚠️ 미검증 |
+| OpenAI | `GET /v1/organization/projects` | ⚠️ 미검증 |
+
+`api_keys` / `projects` 는 사용량·비용 리포트가 아니라 **id → 이름·상태 매핑**만 주는
+보조 엔드포인트이고, 페이지네이션도 `after_id`/`after` 로 혼자 다릅니다.
 "서비스별 사용량" 표가 이걸 씁니다 (§3-7).
-
-Vercel 엔드포인트는 2026-02-19 changelog
-["Access billing usage and cost data via API"](https://vercel.com/changelog/access-billing-usage-cost-data-api)
-로 공개된 정식 API 가 맞고, 스펙은
-[List FOCUS billing charges](https://vercel.com/docs/rest-api/billing/list-focus-billing-charges)
-레퍼런스로 필드 단위까지 대조했습니다. CLI 대응물은 `vercel usage --from … --to …` 입니다.
 
 ### 설계 원칙 (키가 없어도 안전한 이유)
 
@@ -71,8 +69,6 @@ import {
   fetchAllAnthropicUsageBuckets,
   centsStringToUsd,
 } from "@/lib/clients/anthropic";
-import { fetchVercelBillingCharges, sumChargesByDay } from "@/lib/clients/vercel";
-
 // Anthropic — 페이지네이션까지 알아서
 const usage = await fetchAllAnthropicUsageBuckets({
   starting_at: "2026-07-01T00:00:00Z",
@@ -88,14 +84,11 @@ const cost = await fetchAllAnthropicCostBuckets({
   group_by: ["description", "workspace_id"], // cost_report 는 이 둘만 가능
 });
 const usd = centsStringToUsd(cost[0].results[0].amount); // "123.45" → 1.2345
-
-// Vercel — 페이지네이션 없음, 한 번에 전량
-const charges = await fetchVercelBillingCharges({
-  from: "2026-07-01T00:00:00Z", // 포함
-  to: "2026-08-01T00:00:00Z",   // 제외
-});
-const daily = sumChargesByDay(charges, { onlyUsage: true });
 ```
+
+⚠️ 위는 **클라이언트를 직접 부르는 예**입니다. 앱 코드에서는 이렇게 부르지 마세요 —
+조회 파라미터가 `lib/services.ts` 와 어긋나면 KST 재구성이 깨집니다.
+화면에 필요한 건 `getServiceSeries(id)` / `getAllSeries()` 입니다 (`lib/data-source.ts`).
 
 ### 테스트 실행
 
@@ -103,21 +96,21 @@ const daily = sumChargesByDay(charges, { onlyUsage: true });
 node --import ./lib/clients/__tests__/ts-resolve.mjs --test "lib/**/__tests__/*.test.ts"
 ```
 
-현재 **113 pass / 0 fail**. 별도 테스트 프레임워크를 설치하지 않고 Node 22 내장
-`node:test` + 타입 스트리핑만 씁니다 (`package.json` 은 건드리지 않았습니다 —
-`"test"` 스크립트로 등록하고 싶으면 위 명령을 그대로 넣으면 됩니다).
+현재 **96 pass / 0 fail** (2026-08-26, Vercel·Supabase 테스트 삭제 후).
+별도 테스트 프레임워크를 설치하지 않고 Node 내장 `node:test` + 타입 스트리핑만 씁니다.
+`package.json` 에 `"test"` 스크립트가 없으니 위 명령을 그대로 쓰세요.
 
 ---
 
 ## 2. 아직 안 한 것 (의도적으로)
 
-- ~~**`lib/data-source.ts` 는 그대로입니다.**~~ → **2026-08-14 교체 완료.**
-  `fetchAnthropic()` 은 `fetchAllAnthropicUsageBuckets()` / `fetchAllAnthropicCostBuckets()`,
-  `fetchVercel()` 은 `fetchVercelBillingCharges()` 를 부릅니다. 인라인 fetch·`requireEnv()` 제거.
-- **재시도(429/5xx 백오프)는 없습니다.** 대시보드가 하루 몇 번 부르는 수준이라 우선
-  뺐습니다. 필요해지면 `getJson()` 한 곳만 감싸면 됩니다.
-- ~~**Supabase 클라이언트는 없습니다.**~~ → **2026-08-25 추가 완료.** 다만 성격이
-  앞의 둘과 다릅니다 — 공개 API 에 **금액 엔드포인트가 없어** 비용이 추정치입니다. §3-8 참고.
+- **재시도(429/5xx 백오프)는 없습니다.** 대신 `lib/vendor-fallback.ts` 가 실패 시
+  직전 값을 계속 내보내고, 429 면 `retry-after` 동안 아예 두드리지 않습니다.
+  진짜 재시도가 필요해지면 `getJson()` 한 곳만 감싸면 됩니다.
+- **OpenAI 실키 검증.** 코드는 다 있지만 응답을 한 번도 못 봤습니다.
+  → `docs/openai-integration.md`
+- **프로젝트별 API 키 나열(OpenAI).** 프로젝트마다 호출이 하나씩 더 나가고,
+  지금은 보조 축이 프로젝트라 필요하지 않습니다.
 
 ---
 
@@ -135,22 +128,20 @@ node --import ./lib/clients/__tests__/ts-resolve.mjs --test "lib/**/__tests__/*.
 - [x] Next.js 서버 컴포넌트/라우트 핸들러에서만 import 하는지 — `lib/data-source.ts` 는
       `app/page.tsx`(서버 컴포넌트)에서만 import 됩니다
 - [x] 첫 호출 응답 원문을 `responses/` 에 떨궈 두기 — `anthropic_usage.json`(81KB),
-      `anthropic_cost.json`(126KB), `anthropic_api_keys.json`(31개 키),
-      `vercel_charges.json`(4.8MB, **내용은 JSONL**).
+      `anthropic_cost.json`(126KB), `anthropic_api_keys.json`(31개 키).
       `responses/*.json` 은 `.gitignore` 대상이라 커밋되지 않습니다.
       키 목록만 다시 뜨려면 `bash scripts/fetch_anthropic_api_keys.sh`
-- [x] 두 벤더의 일 경계 표기 — **둘이 서로 다릅니다.** Anthropic 버킷은 `00:00:00Z`(UTC 자정),
-      Vercel `ChargePeriodStart`/`End` 는 8,708건 **전부** `07:00:00.000Z`(= UTC−7 자정,
-      미 태평양시)였고 구간 길이는 정확히 24시간입니다. 화면 수정 완료 —
-      헤더 배지가 탭별로 `UTC` / `미 태평양시 (UTC−7)` 로 바뀌고, 각주에는 탭별 상세를
-      적었습니다 (`lib/types.ts` 의 `DayBoundary`, `lib/data-source.ts` 의 `DAY_BOUNDARIES`).
-      "두 탭을 같은 날짜로 비교하지 말라"는 경고는 처음에 각주에 뒀다가
-      **탭 바로 아래 배너로 옮겼습니다** — 스크린샷으로 재어 보니 각주 위치는
-      Vercel 탭 기준 5.1화면을 스크롤해야 보였고, 정작 오해가 생기는 지점은
-      탭 전환 직후 상단이기 때문입니다. 두 서비스의 `dayBoundary.label` 이
-      서로 다를 때만 렌더링됩니다
-      ⚠️ 확보한 데이터가 4일치(08-10~08-13)뿐이고 전부 서머타임 기간이라
-      **겨울에 UTC−8(08:00Z)로 바뀌는지는 미확인**입니다. 11월 이후 재확인 필요
+      ⚠️ **이 덤프는 앱이 받는 응답과 다릅니다.** 스크립트 기본값은 "지난 7일 / 1일 버킷",
+      앱은 "전월 1일~지금 / **1시간** 버킷" 입니다. 같은 조건을 재현하려면
+      `BUCKET_WIDTH=1h DAYS=60 bash scripts/fetch_anthropic_usage.sh`
+- [x] 일 경계 — **모든 서비스가 KST 자정**입니다 (2026-08-26 확정).
+      예전에는 벤더마다 달라서(Anthropic UTC / Vercel 미 태평양시 / Supabase UTC)
+      "탭마다 기준이 다르다" 경고 배너를 화면에 달아야 했습니다. AI API 만 다루기로
+      하면서 그 문제가 사라졌습니다 — 두 벤더 모두 사용량을 1시간 버킷으로 주므로
+      KST 자정(= UTC 15:00 **정각**)에 정확히 맞춰 다시 접을 수 있습니다.
+      구현은 `lib/kst-days.ts`, 경계 정의는 `lib/data-source.ts` 의 `KST_BOUNDARY`.
+      ⚠️ 1시간 버킷을 안 주는 벤더를 추가하면 이 전제가 깨집니다.
+      그때는 KST 라고 우기지 말고 배너를 되살릴 것 (`components/Dashboard.tsx` 주석).
 
 ### 3-2. Anthropic Admin API
 
@@ -180,59 +171,20 @@ node --import ./lib/clients/__tests__/ts-resolve.mjs --test "lib/**/__tests__/*.
 - [x] **List API Keys 200** — `GET /v1/organizations/api_keys` 로 31개 키 수신
       (active 28 / archived 3, `has_more: false`). §3-7 참고
 
-### 3-3. Vercel Billing API
+### 3-3. ~~Vercel Billing API~~ — 삭제됨 (2026-08-26)
 
-- [x] 토큰 scope 가 **조회하려는 팀**으로 잡혀 있는지 — `team_C0AdBRy...` 로 200
-- [x] 역할 확인 — 403 없이 조회됨
-- [x] **플랜 확인** — Hobby 가 아니라 **Pro** (`ServiceName: "Pro"` 구독 항목이 옵니다).
-      빈 배열이 아니라 8,708건
-- [x] 응답 `content-type` 이 `application/jsonl` 인지, 한 줄 = charge 1건인지 — 확인
-- [x] ⚠️→✅ **`Tags.ProjectId` / `Tags.ProjectName` 키 이름** — 정확합니다. 다만 **8,708건 중
-      2,108건(24%)은 `Tags` 가 `{}`** 라서 "(프로젝트 미지정)" 이 비용 1위(40.6%)로 잡힙니다.
-      키 이름 문제가 아니라 Vercel 이 태그를 안 붙이는 charge 가 원래 있는 것
-- [x] ⚠️→✅ **`ConsumedUnit` 실제 값 목록 수집** — 21종 확인, `types.ts` 주석에 기록.
-      `minute / hour / gigabyte / gigabyte-hour / gigabyte-month / Invocations / Requests /
-      Execution Units / Reads / Writes / Operations / Units / Transformations / Creations /
-      Events / Data Points / Traces / Projects / Seats / Credits` + null(구독 항목).
-      지표 매핑은 `lib/adapters/vercel.ts` 의 `SERVICE_TO_METRIC` / `UNIT_TO_METRIC`
-- [x] ⚠️→✅ `ConsumedQuantity` vs `PricingQuantity` — **단위가 다른 게 아니라 성격이 다릅니다.**
-      `PricingUnit` 이 전부 `"USD"`, `PricingQuantity` 는 금액(대부분 0)입니다.
-      사용량은 `ConsumedQuantity` 기준으로 확정. 정수가 아닐 수 있음(일 경계 안분)
-- [x] ⚠️→✅ `RegionId` / `RegionName` / `ServiceCategory` 존재율 — **항상 오지 않습니다.**
-      RegionId·RegionName 91.5%, ServiceCategory 99.9%. `types.ts` optional 유지가 맞습니다.
-      추가 발견: **`ServiceCategory` 는 FOCUS 표준 enum 이 아니라 Vercel 자체 15종**이었습니다
-      (`Build & Deploy`, `Vercel Functions`, `Observability` …). `types.ts` 수정 완료
-- [x] **합계 기준 확정** — 이번 응답은 8,708건 **전부 `ChargeCategory: "Usage"`** 였습니다.
-      `Credit` / `Tax` / `Adjustment` 는 한 건도 오지 않아 두 숫자가 현재는 동일합니다
-- [x] `BilledCost` 와 `EffectiveCost` 가 갈리는지 — **크게 갈립니다.** `PricingCategory` 가
-      8,692건 `Committed`(선결제 포함분)라 `BilledCost` 는 합계 $0.0000000002,
-      `EffectiveCost` 는 $9.57. **대시보드는 `EffectiveCost` 로 확정** (BilledCost 로는
-      실사용이 전부 $0.00 으로 보임)
-- [x] 1년 초과 요청이 클라이언트에서 막히는지 — `assertValidRange()` 가 `RangeError`.
-      348일(2025-09-01~2026-08-15) 요청은 실제 API 도 200
-- [x] **조회 가능 구간** — 이 계정의 청구 데이터는 **2026-08-10 부터**만 존재합니다.
-      데이터가 하나도 없는 구간을 요청하면 빈 배열이 아니라
-      **HTTP 404 `{"error":{"code":"costs_not_found","message":"Costs not found"}}`** 가 옵니다.
-      `from` 을 아무리 앞당겨도 반환 범위는 08-10~08-13 로 동일하고, 늘어나는 건 0원 행뿐입니다
-      (from=08-01 → 7,552행 / 07-01 → 8,708행 / 2025-09-01 → 9,200행, EffectiveCost 합은 셋 다 $9.57)
-- [x] **404 `costs_not_found` 는 빈 배열로 처리** — 진짜 에러가 아니라 "그 기간엔 데이터가 없다"
-      는 뜻이라, `fetchVercelBillingCharges()` 가 예외 대신 `[]` 를 돌려줍니다.
-      상태 코드만 보지 않고 **`error.code` 까지 확인**합니다(`isCostsNotFound`) — 다른 이유의
-      404 는 그대로 던집니다. 안전한 판별인 근거: **잘못된 teamId·토큰은 404 가 아니라
-      403 `forbidden`** 으로 옵니다 (실측). 회귀 테스트 4개 추가
+AI API 만 다루기로 하면서 Vercel 클라이언트와 그 검증 기록을 함께 지웠습니다.
+되살릴 일이 있으면 `git log -- lib/clients/vercel.ts` 로 찾을 수 있습니다.
 
 ### 3-4. 검증 후 정리
 
 - [x] `types.ts` 의 `⚠️ 실제 응답으로 검증 필요` 주석을 확인된 것부터 제거 —
       `amount`(센트), `Tags`, `ConsumedUnit`, `ConsumedQuantity`, `ServiceCategory`,
       `buildQuery` 의 `group_by[]` 주석 갱신 완료. `speed` 만 `⚠️` 로 남김
-- [ ] 실제 응답 1건씩을 `mock/*.json` 에 반영 (지금 목업은 문서 스키마 기준 추정치).
-      **추가로: 목업 usage 는 `api_key_id` 가 전부 null** 이라 `DATA_SOURCE=mock` 에서는
-      "서비스별 사용량" 표가 `(콘솔 직접 사용)` 한 줄로만 나옵니다. 표가 고장 난 게 아니라
-      목업에 키가 없는 것입니다. `scripts/gen_mock.py` 가 키를 몇 개 섞어 주도록 고치면
-      목업에서도 표가 보입니다.
-      특히 목업 Vercel 은 `ServiceName` 이 `Build Execution` / `Fluid Compute` 처럼
-      **실제로 존재하지 않는 이름**이라 매핑 검증에 쓸 수 없습니다
+- [x] ~~목업 usage 의 `api_key_id` 가 전부 null 이라 "서비스별" 표가 한 줄뿐~~ →
+      **2026-08-26 수정.** `scripts/gen_mock.py` 가 키 4개(활성 3 · archived 1)를
+      섞어 주므로 `DATA_SOURCE=mock` 에서도 표·안분·비활성 배지가 전부 보입니다
+- [ ] 실제 응답 1건씩을 `mock/*.json` 에 반영 (지금 목업은 문서 스키마 기준 추정치)
 - [ ] `docs/api-response-notes.md` 의 "남은 검증 항목" 체크박스와 이 문서를 동기화
 - [x] `lib/data-source.ts` 를 이 클라이언트로 교체 (§2 참고)
 
@@ -307,15 +259,8 @@ PY
 
 ### 3-6. 실키 검증에서 새로 드러난 것 (2026-08-14)
 
-- **Vercel 지표 매핑이 거의 비어 있었습니다.** `SERVICE_TO_METRIC` 에 5종만 있었고 그중
-  2종(`Build Execution`, `Fluid Compute`)은 실재하지 않는 이름이라, 8,708건 중 5,804건이
-  미분류였습니다. 실제 61종을 전부 매핑하고 `ConsumedUnit` 기반 폴백을 추가해 99.7% 로
-  올렸습니다. 남은 28건은 구독료·좌석 수처럼 사용량이 아닌 항목이라 **의도적으로** 뺐습니다.
-- **`buildMinutes` 가 항상 0 이었던 이유** — 실제 이름은 `Build CPU Minutes` 입니다.
-  30일 기준 1,372분이 잡히고, 이게 EffectiveCost 최대 항목($4.73)입니다.
-- **지표는 `ConsumedUnit` 이 같은 것끼리만 묶었습니다.** 분·시간·GB·건수를 한 칸에 더하면
-  숫자가 의미를 잃습니다. `gigabyte` 만 전송(`bandwidthGb`)과 저장(`storageGb`)으로 갈라
-  손으로 분류했고, 새 `gigabyte` 서비스는 폴백이 받지 않고 일부러 누락시킵니다.
+이 절에 있던 내용은 전부 Vercel 지표 매핑 이야기라 2026-08-26 에 삭제했습니다.
+Anthropic 쪽에서 드러난 것은 §3-5(센트 단위)·§3-7(키별 안분)에 남아 있습니다.
 
 ### 3-7. 서비스(API 키)별 집계 — 무엇이 실측이고 무엇이 추정인지
 
@@ -390,82 +335,19 @@ PY
 
 ---
 
-## 3-8. Supabase (2026-08-25 추가) — **실키 검증 전**
+## 3-8. ~~Supabase~~ — 삭제됨 (2026-08-26)
 
-Anthropic·Vercel 과 달리 이 절의 근거는 **실제 응답이 아니라 공식 OpenAPI 스펙**입니다
-(`GET https://api.supabase.com/api/v1-json`, 2026-08-25 수신, 경로 115개). 필드명·enum·
-쿼리 파라미터는 스펙 원본에서 그대로 옮겼으므로 정확하지만, 실제 응답으로 확인한 것은
-아직 하나도 없습니다.
+AI API 만 다루기로 하면서 Supabase 클라이언트·어댑터·테스트를 지웠습니다.
+그 절에 적혀 있던 결론(공개 API 에 금액 엔드포인트가 없어 비용이 추정치였다는 것)은
+더 이상 이 프로젝트와 관계가 없습니다. 되살릴 일이 있으면
+`git log -- lib/clients/supabase.ts` 로 찾을 수 있습니다.
 
-### 먼저 알아야 할 두 가지
+---
 
-**① 금액(USD) 엔드포인트가 없습니다.** 스펙 115개 경로 중 usage/billing/cost 계열은
-아래가 전부이고, "이번 달 얼마" 에 해당하는 값은 어디에도 없습니다. 대시보드의
-Usage & Billing 화면은 공개 API 가 아닌 내부 `platform/` API 를 씁니다.
+## 4. GPT(OpenAI) 는 어디에
 
-| 경로 | 주는 것 | 한계 |
-|---|---|---|
-| `/v1/projects` | 프로젝트 전량 (ref·name·org·region·status) | 페이지네이션 없음 |
-| `/v1/organizations` | 조직 목록 | **`plan` 이 없음** |
-| `/v1/organizations/{slug}` | 조직 상세 + `plan` | 플랜 **이름**만. 금액 없음 |
-| `/v1/projects/{ref}/analytics/endpoints/usage.api-counts` | auth·rest·realtime·storage 요청 수 시계열 | **`from`/`to` 없음.** `interval` 만 |
-| `/v1/projects/{ref}/billing/addons` | 애드온 + `variant.price.amount` | **금액이 나오는 유일한 곳** |
-| `/v1/projects/{ref}/analytics/endpoints/metrics` | Prometheus 텍스트 (DB 크기·CPU) | 현재값 스냅샷만, 이력 없음 (미사용) |
+이 문서의 체크리스트는 Anthropic 기준으로 이미 소진됐습니다.
+OpenAI 는 성격이 달라서 — **틀려도 에러가 안 나고 그럴듯한 숫자가 뜨는** 위험이 커서 —
+별도 문서로 뺐습니다:
 
-그래서 대시보드의 Supabase 비용은 **(조직 플랜 정액 + 프로젝트 애드온 정액) ÷ 그 달의 일수**
-입니다. 매일 같은 금액이 찍히고 사용량이 늘어도 비용 곡선은 움직이지 않습니다 — 버그가
-아닙니다. 빠지는 것: 무료 한도 초과 종량 과금(대역폭·저장용량·MAU·Edge Function),
-`price.type === "usage"` 인 애드온, 크레딧·할인·세금.
-
-플랜 요금표(`SUPABASE_PLAN_MONTHLY_USD`)는 **이 저장소에서 유일한 가격 하드코딩**입니다
-(`lib/adapters/supabase.ts`). API 가 플랜 이름만 주기 때문입니다. 가격이 바뀌면 거기만
-고치면 됩니다. `enterprise`·`platform` 은 공시가가 없어 0 으로 두고 화면에 `요금 미반영`
-배지를 답니다.
-
-**② 토큰이 계정(사람) 단위입니다.** PAT 하나로 그 사람이 속한 모든 조직은 보이지만,
-다른 계정 소유 프로젝트는 절대 안 보입니다. 그래서 이 클라이언트만 "토큰 목록" 을 받습니다:
-
-```
-SUPABASE_ACCESS_TOKENS=회사=sbp_aaa...,개인=sbp_bbb...
-```
-
-계정 하나가 죽어도(토큰 만료 등) 나머지 계정은 살고, 그 계정은 표에 `조회 실패` 배지로
-남습니다. 전부 죽으면 계정별 사유를 모아 던집니다.
-
-### 체크리스트 (첫 토큰을 넣은 직후 순서대로)
-
-- [ ] ⚠️ **`usage.api-counts` 가 며칠치를 돌려주는지** — 스펙에 명시가 없습니다.
-      `interval=1day` 로 부른 뒤 `result[].timestamp` 의 최소·최대를 확인하고 여기에 적으세요.
-      **Claude·Vercel 은 전월 1일~오늘을 우리가 지정해 받지만 Supabase 는 지정이 불가능**해서,
-      Supabase 탭만 날짜 축이 짧을 수 있습니다
-- [ ] ⚠️ **`timestamp` 가 UTC 자정 정각인지** — 현재 `DAY_BOUNDARIES.supabase` 를 UTC 로 적어
-      뒀습니다. 다른 시각으로 오면 Vercel 처럼 라벨을 고쳐야 합니다
-- [ ] ⚠️ **`/v1/organizations/{slug}` 의 `plan` 실제 값** — 스펙 enum 은
-      `free|pro|team|enterprise|platform` 입니다. 다른 값이 오면 요금표에 추가하세요
-- [ ] ⚠️ **`billing/addons` 의 `price.interval`** — 스펙상 `monthly` / `hourly` 둘 다 가능합니다.
-      어느 쪽이 실제로 오는지에 따라 일할 계산이 갈립니다 (어댑터는 둘 다 처리)
-- [ ] ⚠️ **Free 플랜 조직에서 `/billing/addons` 가 200 인지** — 403/404 면 어댑터가 비용 0 으로
-      떨어지고 사용량만 표시됩니다 (클라이언트가 애드온 실패는 조용히 삼킵니다)
-- [ ] ⚠️ **분당 60요청 제한** — 프로젝트 하나에 2요청(usage + addons)이 나갑니다. 계정당
-      프로젝트가 30개를 넘으면 429 가 납니다. 동시요청 4개로 제한하고 429 는 `Retry-After`
-      만큼 **한 번만** 재시도합니다. 프로젝트가 아주 많으면 재시도로도 부족할 수 있습니다
-- [ ] ⚠️ **일시정지(`INACTIVE`) 프로젝트** — 사용량 조회를 아예 건너뛰도록 해 뒀습니다
-      (analytics 가 404/403 을 낼 것으로 예상). 실제로는 200 이 온다면 이 분기를 지우세요
-      (`lib/clients/supabase.ts` 의 `fetchSupabaseAccountSnapshot`)
-- [ ] 첫 응답 원문을 `responses/supabase_*.json` 에 떨궈 두기
-- [ ] `mock/supabase-usage.json` 을 실제 응답 모양으로 교체 (지금은 스펙 기준 추정치)
-
-### 이번에 함께 드러난 것 (Supabase 와 무관하지만 같이 고침)
-
-- **`unstable_cache` 는 2MB 를 넘으면 저장을 거부합니다.** Vercel 탭을 켜자마자
-  `items over 2MB can not be cached (24591607 bytes)` 가 unhandledRejection 으로 터졌고,
-  캐시가 매번 실패해 요청마다 24.5MB 를 다시 받느라 첫 로드가 **14.5초** 걸렸습니다.
-  원본 charge 대신 **어댑터를 통과시킨 결과(`DailyPoint[]`)를 캐싱**하도록 바꿔
-  6.8초(첫 호출) / **0.07초(캐시 히트)** 가 됐습니다. Claude 는 버킷 응답이라 아직 여유가
-  있지만, 조직이 커지면 같은 한도에 걸릴 수 있습니다
-- **`ServiceSeries.note` 가 타입에만 있고 화면에 렌더되지 않고 있었습니다.**
-  Supabase 의 "비용은 추정치" 경고를 적을 곳이 거기뿐이라 드러났습니다.
-  `components/Dashboard.tsx` 각주에 `whitespace-pre-line` 으로 출력하도록 추가했습니다
-- **한 서비스가 실패하면 페이지 전체가 죽었습니다** (`Promise.all`). 토큰을 아직 안 넣은
-  서비스 때문에 멀쩡한 탭까지 못 보는 건 곤란해서, 실패한 서비스는 **빈 탭 + 사유**로
-  남기고 전부 실패했을 때만 에러 화면을 띄웁니다 (`getAllSeries`)
+→ **`docs/openai-integration.md`**

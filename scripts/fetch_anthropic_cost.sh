@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Anthropic Admin API — Cost Report (지난 7일, 1일 단위)
+# Anthropic Admin API — Cost Report (기본 지난 7일, 1일 단위)
+#
+# ⚠️ **이 덤프는 앱이 실제로 받는 응답이 아니다** — 앱은 전월 1일부터 받는다.
+#    조회 일수는 DAYS 환경변수로 바꾼다: DAYS=60 bash scripts/fetch_anthropic_cost.sh
+#
+# ⚠️ 시간당 90회 쿼터를 usage_report 와 함께 쓴다. 개발 서버를 끄고 돌릴 것.
 #
 #   GET https://api.anthropic.com/v1/organizations/cost_report
 #   헤더: x-api-key, anthropic-version
@@ -20,7 +25,8 @@ API_BASE="${ANTHROPIC_API_BASE:-https://api.anthropic.com}"
 mkdir -p "$RESPONSE_DIR"
 OUT="$RESPONSE_DIR/anthropic_cost.json"
 
-STARTING_AT="$(iso_days_ago 7)"
+DAYS="${DAYS:-7}"
+STARTING_AT="$(iso_days_ago "$DAYS")"
 ENDING_AT="$(iso_today)"
 
 CURL_CFG="$(make_curl_config \

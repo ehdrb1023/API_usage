@@ -1,31 +1,44 @@
 # API 응답 구조 정리
 
-> **검증 상태: 공식 문서 기준 (실제 응답 미검증)**
-> `.env` 가 아직 없어 실제 호출을 하지 못했습니다. 아래 필드 표는 각 벤더의 공식 API 레퍼런스에서
-> 확인한 스키마입니다. 키를 채우고 `bash scripts/fetch_all.sh` 를 돌린 뒤,
-> 실제 응답과 다른 부분을 이 문서에 반영해야 합니다.
-> 스크립트 자체는 문서 스키마대로 응답하는 목 서버로 검증 완료 (페이지네이션·403 경로 포함).
+> **범위: AI API 만.** 2026-08-26 에 Vercel·Supabase(인프라 비용) 절을 삭제했습니다.
+> 이 대시보드는 Claude·GPT 등 AI API 비용만 다룹니다.
+>
+> **검증 상태**
+> - Anthropic — ✅ 2026-08-14 실키로 검증 완료
+> - OpenAI — ⚠️ **공개 문서 기준, 실응답 미검증.** 확인 절차는 `docs/openai-integration.md`
 
 출처:
 - [Anthropic — Get Messages Usage Report](https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-messages-usage-report)
 - [Anthropic — Get Cost Report](https://platform.claude.com/docs/en/api/admin-api/usage-cost/get-cost-report)
-- [Vercel — List FOCUS billing charges](https://vercel.com/docs/rest-api/billing/list-focus-billing-charges)
-- [Vercel changelog — Access billing usage and cost data via API (2026-02-19)](https://vercel.com/changelog/access-billing-usage-cost-data-api)
+- [OpenAI — Usage API](https://platform.openai.com/docs/api-reference/usage)
 
 ---
 
-## 0. 세 API 한눈에 비교
+## 0. 네 엔드포인트 한눈에 비교
 
-| | Anthropic Usage | Anthropic Cost | Vercel FOCUS Charges |
-|---|---|---|---|
-| 경로 | `GET /v1/organizations/usage_report/messages` | `GET /v1/organizations/cost_report` | `GET /v1/billing/charges` |
-| 인증 | `x-api-key` (Admin 키) | `x-api-key` (Admin 키) | `Authorization: Bearer` |
-| 응답 형식 | JSON | JSON | **JSONL** (`application/jsonl`) |
-| 비용(USD) 필드 | ❌ 없음 (토큰 수만) | ✅ `amount` (**센트 단위 문자열**) | ✅ `BilledCost` / `EffectiveCost` (USD number) |
-| 시간 단위 | 1m / 1h / 1d | **1d 만** | 1d 고정 |
-| 최대 범위 | 1d 기준 31버킷 | 문서상 명시 없음 | **1년** |
-| 페이지네이션 | 커서 (`next_page`) | 커서 (`next_page`) | **없음** (전량 스트리밍) |
-| 플랜 제약 | 조직 Admin 키 필요 | 조직 Admin 키 필요 | Owner/Member/Developer/Security/Billing/Enterprise Viewer 역할 |
+**같은 모양의 제약이 두 벤더에 똑같이 있다** — 사용량은 시간 단위로 쪼갤 수 있지만
+비용은 하루(UTC) 단위뿐이고, 비용을 키/프로젝트·모델로 나눌 수 없다.
+그래서 KST 하루 비용은 두 벤더 모두 **단가 역산**으로 만든다 (`lib/token-rates.ts`).
+
+| | Anthropic Usage | Anthropic Cost | OpenAI Usage | OpenAI Costs |
+|---|---|---|---|---|
+| 경로 | `/v1/organizations/usage_report/messages` | `/v1/organizations/cost_report` | `/v1/organization/usage/completions` | `/v1/organization/costs` |
+| | 복수 organizations | 복수 | **단수** organization | **단수** |
+| 인증 | `x-api-key` (Admin) | `x-api-key` (Admin) | `Authorization: Bearer` (Admin) | 같음 |
+| 시각 표기 | ISO8601 문자열 | ISO8601 | **unix 초 정수** | **unix 초** |
+| 비용 필드 | ❌ (토큰만) | ✅ `amount` — **센트 문자열** | ❌ (토큰만) | ✅ `amount.value` — **USD 실수** |
+| 시간 단위 | 1m / 1h / **1d** | **1d 만** | 1m / 1h / 1d | **1d 만** |
+| 모델별 비용 | — | ❌ (group_by 불가) | — | ❌ (line_item 뿐) |
+| 키/프로젝트별 비용 | — | ❌ (workspace_id 뿐) | — | ✅ project_id |
+| 페이지네이션 | 커서 `next_page` | 커서 | 커서 `next_page` | 커서 |
+| 검증 | ✅ 2026-08-14 | ✅ | ⚠️ 미검증 | ⚠️ 미검증 |
+
+⚠️ **가장 잘 틀리는 세 가지** (두 벤더를 나란히 만질 때):
+> 1. 금액 단위가 **반대**다 — Anthropic 센트 문자열 / OpenAI USD 실수
+> 2. 경로 단·복수가 다르다 — `organizations` / `organization`
+> 3. OpenAI `input_tokens` 는 `input_cached_tokens` 를 **포함**한다.
+>    Anthropic `uncached_input_tokens` 는 캐시를 **뺀** 값이다.
+>    (`lib/adapters/openai.ts` 가 빼서 뜻을 맞춘다)
 
 ---
 
@@ -139,110 +152,98 @@ Grafana 에서 반드시 두 단계를 거쳐야 합니다.
 
 ---
 
-## 3. Vercel — FOCUS billing charges
+## 3. OpenAI — Usage / Costs
 
-`GET https://api.vercel.com/v1/billing/charges`
-
-2026-02-19 changelog 에서 공개된 엔드포인트가 맞습니다. FOCUS v1.3 오픈 표준 포맷입니다.
+⚠️ **아래 전체가 미검증입니다.** 실 키가 생기면 `bash scripts/fetch_openai.sh` 로 원문을
+떠서 `docs/openai-integration.md` 체크리스트를 지우고, 다른 부분을 여기 반영하세요.
 
 ### 요청
 
-| 파라미터 | 필수 | 값 | 비고 |
-|---|---|---|---|
-| `from` | ✅ | ISO 8601 UTC | **포함**(inclusive) |
-| `to` | ✅ | ISO 8601 UTC | **제외**(exclusive) |
-| `teamId` | | string | 팀 스코프 |
-| `slug` | | string | `teamId` 대신 팀 slug 로도 지정 가능 |
+```
+GET https://api.openai.com/v1/organization/usage/completions
+  ?start_time=1787529600        # unix 초 (필수)
+  &end_time=1787616000
+  &bucket_width=1h              # 1m | 1h | 1d
+  &group_by=model&group_by=project_id
+  &limit=168
+Authorization: Bearer sk-admin-...
+```
 
-- 헤더: `Authorization: Bearer <token>`, 선택적으로 `Accept-Encoding: gzip`
-- 1일 granularity, **최대 범위 1년**
-- 필요 역할: Owner / Member / Developer / Security / Billing / Enterprise Viewer
+```
+GET https://api.openai.com/v1/organization/costs
+  ?start_time=...&bucket_width=1d
+  &group_by=line_item&group_by=project_id
+  &limit=180                    # ⚠️ 기본값 7 — 그대로 두면 8일째부터 잘린다
+```
 
-### ✅ 실제 "비용(원가)" 필드가 있습니다
+### 응답 구조 (문서 기준)
 
-1차 조사에서는 Vercel 에 공개 청구 API 가 없다고 봤는데, **틀렸습니다.** 이 엔드포인트에는
-정식 비용 필드가 두 개 있습니다.
+```jsonc
+{
+  "object": "page",
+  "data": [{
+    "object": "bucket",
+    "start_time": 1787529600,   // unix 초
+    "end_time": 1787616000,
+    "results": [{
+      "object": "organization.usage.completions.result",
+      "input_tokens": 10000000,        // ⚠️ input_cached_tokens 포함
+      "input_cached_tokens": 4000000,
+      "output_tokens": 1000000,
+      "num_model_requests": 300,
+      "project_id": "proj_...",
+      "api_key_id": null,
+      "model": "gpt-5"
+    }]
+  }],
+  "has_more": false,
+  "next_page": null
+}
+```
 
-| 필드 | 타입 | 의미 |
-|---|---|---|
-| **`BilledCost`** | number | **청구서의 기준이 되는 금액.** 대시보드 "실제 지불액"은 이 필드 |
-| **`EffectiveCost`** | number | 할인·선결제 크레딧 상각을 반영한 **상각 원가**. FinOps 관점의 실질 원가 |
-| `BillingCurrency` | string | `USD` 고정 |
+costs 의 결과 행:
 
-두 값은 다를 수 있습니다. 크레딧으로 커버된 사용량은 `BilledCost > 0` 이어도 `EffectiveCost = 0`
-이 될 수 있으므로, **"청구액" 패널은 `BilledCost`, "원가 배분" 패널은 `EffectiveCost`** 로 나누는 게 맞습니다.
+```jsonc
+{
+  "object": "organization.costs.result",
+  "amount": { "value": 12.5, "currency": "usd" },   // ⚠️ USD 실수. 100 으로 나누지 말 것
+  "line_item": "gpt-5, output",                     // ⚠️ 실제 형식 미검증
+  "project_id": "proj_..."
+}
+```
 
-### 사용량 필드
+### 주의점
 
-| 필드 | 타입 | 의미 |
-|---|---|---|
-| `ConsumedQuantity` | number\|null | 소비량. 측정 가능한 소비가 없는 charge 는 null |
-| `ConsumedUnit` | string\|null | 소비량 단위 (예: GB-hours, requests) |
-| `PricingQuantity` | number | 과금 계산에 쓰인 수량 |
-| `PricingUnit` | string | 과금 단위 (예: million requests) |
-| `PricingCategory` | enum | `Standard`, `Committed`, `Dynamic`, `Other` |
-
-`ConsumedQuantity` 와 `PricingQuantity` 는 **단위가 다릅니다** (예: 250,000 requests vs 0.25 million
-requests). 사용량 그래프를 그릴 때 어느 쪽 단위로 통일할지 먼저 정해야 합니다.
-
-### 분류 / 메타 필드
-
-| 필드 | 타입 | 의미 |
-|---|---|---|
-| `ChargeCategory` | enum | `Usage`, `Purchase`, `Credit`, `Adjustment`, `Tax` |
-| `ChargePeriodStart` / `ChargePeriodEnd` | string | 시작 포함 / 끝 제외 (ISO 8601 UTC) |
-| `ServiceName` | string | 서비스 표시명 (예: Fluid Compute, Edge Requests) |
-| `ServiceCategory` | enum | `Compute`, `Networking`, `Storage`, `Web`, `AI and Machine Learning` 등 |
-| `ServiceProviderName` | string | 제공자 |
-| `RegionId` / `RegionName` | string | 리전 |
-| **`Tags`** | object | **`ProjectId`, `ProjectName` 이 여기 들어 있음** |
-
-**프로젝트별 비용을 보려면 `Tags.ProjectName` 으로 그룹핑**해야 합니다. 최상위에 project 필드가
-따로 있는 게 아니라 `Tags` 객체 안에 중첩되어 있다는 점에 주의.
-
-### ⚠️ 합계를 낼 때
-
-`ChargeCategory` 에 `Credit`, `Tax`, `Adjustment` 가 섞여 들어옵니다. "사용량 비용"만 보려면
-`ChargeCategory == "Usage"` 로 필터해야 하고, "실제 청구 총액"을 보려면 전부 더해야 합니다.
-두 숫자는 다릅니다.
+1. **`line_item` 형식이 파서의 전제다.** `lib/adapters/openai.ts` 의 `parseLineItem` 이
+   `"모델명, 종류"` 로 가정하고 모델·토큰 종류를 뽑는다. 못 뽑으면 단가가 블렌디드
+   하나로 떨어져 모델별 비용이 부정확해지는데, **화면에는 그럴듯한 숫자가 그대로 뜬다.**
+   틀려도 티가 안 나므로 원문 확인이 반드시 필요하다.
+2. **조직 전체 API 키를 나열하는 엔드포인트가 없다.** 프로젝트별로만 조회된다.
+   그래서 보조 축이 API 키가 아니라 **프로젝트**다.
+3. **보관된 프로젝트도 받아야 한다.** `include_archived=true` 를 빼면 과거 사용량 중
+   보관된 프로젝트 몫이 통째로 "미등록" 으로 뜬다 (Anthropic 의 archived 키에서 실제로 겪은 문제).
 
 ---
 
 ## 4. 페이지네이션 정리
 
-| API | 방식 | 처리 |
+| 엔드포인트 | 방식 | 처리 |
 |---|---|---|
-| Anthropic (둘 다) | 커서 | `has_more == true` 이면 `next_page` 를 `page` 파라미터로 재요청. `fetch_*.sh` 가 루프로 처리해 `data` 배열을 병합 저장 |
-| Vercel | 없음 | JSONL 스트림으로 전량 반환. `-N` 으로 버퍼링 끄고 받음 |
+| Anthropic usage/cost | 커서 | `has_more == true` 이면 `next_page` 를 `page` 로 재요청 |
+| Anthropic api_keys | **after_id** | `last_id`(없으면 마지막 항목 id)를 `after_id` 로 재요청 |
+| OpenAI usage/costs | 커서 | Anthropic 리포트와 같은 `has_more`/`next_page` |
+| OpenAI projects | **after** | `last_id` 를 `after` 로 재요청 |
 
-Anthropic 은 `limit` 상한(1d 기준 31버킷)이 있어서 **30일 조회 시에도 한 페이지에 들어갈 수
-있지만**, 90일 대시보드를 만들면 반드시 여러 페이지가 됩니다. 스크립트는 이미 루프를 돌립니다.
+**두 벤더 모두 목록 엔드포인트만 방식이 다르다.** 리포트 코드를 복사해 목록에 쓰면
+21번째 항목부터 조용히 사라진다. 구현은 `lib/clients/*.ts` 에 각각 있고,
+스크립트 쪽은 `scripts/_json.py` 의 `page-info` / `keys-page-info` 로 갈린다.
 
----
-
-## 5. Grafana Infinity 연동 시 반영해야 할 것
-
-문서 조사 단계에서 드러난, 대시보드 설계에 직접 영향을 주는 항목입니다.
-
-1. **Anthropic `amount` 를 100 으로 나눌 것.** 안 하면 100배. 컬럼 타입도 string → number 캐스팅 필요.
-2. **Vercel 응답은 JSONL 이라 Infinity 의 기본 JSON 파서로 바로 안 읽힙니다.**
-   현재 스크립트는 `vercel_usage.json` (배열 변환본)을 함께 저장합니다. Infinity 를 API 에
-   직결하려면 UQL 로 라인 분해가 되는지 검증하거나, 스크립트를 주기 실행해 변환된 JSON 을
-   정적 파일로 서빙하는 쪽이 확실합니다.
-3. **Infinity 커서 페이지네이션 지원 여부는 실측 필요.** Infinity 에 pagination 기능이 있지만
-   Anthropic 의 opaque 커서 방식과 맞는지 확인되지 않았습니다. 안 되면 스크립트 선실행 방식으로.
-4. **Anthropic 총 토큰은 5개 필드 합산.** 단일 total 필드 없음.
-5. **Vercel 프로젝트 그룹핑은 `Tags.ProjectName` (중첩 경로).**
-6. **두 벤더의 시간축 정렬.** Anthropic 은 버킷 `starting_at`(포함)/`ending_at`(제외),
-   Vercel 은 `ChargePeriodStart`(포함)/`ChargePeriodEnd`(제외). 규칙이 같아서 그대로 맞물립니다.
-   단 대시보드 타임존을 UTC 로 두거나, `Asia/Seoul` 로 볼 거면 일 경계가 9시간 밀린다는 점을 표기할 것.
+`limit` 기본값도 함정이다 — Anthropic api_keys 는 20, OpenAI costs 는 7이다.
+안 올리면 잘린 줄도 모른다.
 
 ---
 
-## 6. 남은 검증 항목 (실제 키 확보 후)
+## 5. 남은 검증 항목
 
-- [ ] Anthropic Admin 키로 200 응답 확인, 실제 `results[]` 필드가 문서와 일치하는지
-- [ ] `amount` 가 정말 센트인지 Console 청구액과 대조
-- [ ] Vercel 토큰 플랜 확인 — Hobby 플랜이면 `/v1/billing/charges` 가 빈 응답 또는 403 일 가능성
-- [ ] Vercel `ConsumedUnit` 실제 값 목록 수집 (단위 통일 기준 정하기용)
-- [ ] Supabase Management API — 이번 작업 범위 밖. 사용량 엔드포인트 존재 여부 미확인 상태
+Anthropic 은 2026-08-14 에 끝났습니다. 남은 것은 OpenAI 뿐이고,
+순서와 확인 방법은 **`docs/openai-integration.md`** 에 있습니다.

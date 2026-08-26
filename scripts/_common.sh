@@ -87,7 +87,7 @@ http_get() {
        "$url"
 }
 
-# 4xx/5xx 응답 본문을 그대로 출력한다. Anthropic/Vercel 에러 본문에는 키가 포함되지 않는다.
+# 4xx/5xx 응답 본문을 그대로 출력한다. Anthropic/OpenAI 에러 본문에는 키가 포함되지 않는다.
 report_http_error() {
   local code="$1" body_file="$2" which_key="$3" hint="$4"
   warn "HTTP $code — 요청 실패"

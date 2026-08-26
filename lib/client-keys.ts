@@ -2,10 +2,12 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 /**
- * `config/client-keys.json` — 팀이 직접 관리하는 **api_key_id → 표시 이름** 매핑.
+ * `config/client-keys.json` — 팀이 직접 관리하는 **식별자 → 표시 이름** 매핑.
  *
- * 대시보드 "서비스별 사용량" 표에서 Console 키 이름 대신 띄울 이름을 코드 수정 없이
- * 정하기 위한 파일이다. 형식·작성법은 `config/README.md` 참고.
+ * 대시보드 보조 축 표(Claude 탭 "서비스별" = api_key_id, GPT 탭 "프로젝트별" =
+ * project_id)에서 벤더 콘솔 이름 대신 띄울 이름을 코드 수정 없이 정하기 위한 파일이다.
+ * **벤더 구분 없이 한 파일을 쓴다** — 식별자 접두사가 달라 충돌하지 않는다.
+ * 형식·작성법은 `config/README.md` 참고.
  *
  * ⚠️ 여기는 `lib/clients/` (벤더 HTTP 클라이언트)가 아니다. 네트워크를 타지 않고
  *    로컬 파일만 읽는다. 이름이 비슷해서 헷갈리기 쉬우니 주의.
