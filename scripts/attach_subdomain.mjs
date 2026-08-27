@@ -5,6 +5,7 @@
  *   node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> [--apex speciai.kr]
  *   node scripts/attach_subdomain.mjs api api-usage
  *   node scripts/attach_subdomain.mjs api api-usage --check    # 상태만 보기
+ *   node scripts/attach_subdomain.mjs api api-usage --protect  # 접근 보호 켜기
  *
  * 하는 일은 **Vercel 쪽 절반**이다. 나머지 절반인 DNS 레코드 등록은 hosting.kr 에서
  * 사람이 해야 한다 — hosting.kr 은 공개 API 가 없고 구글 계정 로그인이라 자동화가
@@ -27,13 +28,16 @@ const positional = args.filter((a) => !a.startsWith("--"));
 const apexIdx = args.indexOf("--apex");
 const APEX = apexIdx >= 0 ? args[apexIdx + 1] : "speciai.kr";
 const CHECK_ONLY = flags.has("--check");
+const DO_PROTECT = flags.has("--protect");
 
 const [sub, projectName] = positional.filter((a) => a !== APEX);
 
 if (!sub || !projectName) {
   console.error(
     "사용법: node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> [--apex speciai.kr] [--check]\n" +
-      "  예: node scripts/attach_subdomain.mjs api api-usage",
+      "  예: node scripts/attach_subdomain.mjs api api-usage\n" +
+      "  --check   상태만 보고 아무것도 바꾸지 않음\n" +
+      "  --protect 커스텀 도메인까지 덮는 접근 보호를 켬",
   );
   process.exit(1);
 }
@@ -117,12 +121,14 @@ console.log(`✅ 프로젝트 ${project.body.name} (${project.body.id})`);
 const existing = await api(`/v9/projects/${project.body.id}/domains/${FQDN}?${q}`);
 if (existing.ok) {
   console.log(`\nℹ️  ${FQDN} 는 이미 이 프로젝트에 붙어 있습니다.`);
+  if (DO_PROTECT) await enableProtection(project.body.id);
   await report(project.body.id);
   process.exit(0);
 }
 
 if (CHECK_ONLY) {
   console.log(`\n${FQDN} 는 아직 안 붙어 있습니다. (--check 라 여기서 멈춥니다)`);
+  await reportProtection(project.body.id);
   process.exit(0);
 }
 
@@ -147,6 +153,7 @@ if (!added.ok) {
 }
 
 console.log(`\n✅ Vercel 에 ${FQDN} 등록 완료.`);
+if (DO_PROTECT) await enableProtection(project.body.id);
 await report(project.body.id);
 
 // ---------------------------------------------------------------- 결과 안내
@@ -193,9 +200,55 @@ hosting.kr 에서 아래 레코드를 추가하세요 (여기까지가 사람 �
     console.log(`\n🎉 DNS 까지 정상입니다. https://${FQDN} 로 접속됩니다.`);
   }
 
-  console.log(
-    `\n⚠️ 이 프로젝트가 **인증 없이 공개**되면 아무나 조직 전체 AI 지출과 거래처별\n` +
-      `   API 키 이름을 볼 수 있습니다. 붙이기 전에 Vercel → Settings →\n` +
-      `   Deployment Protection 을 켜세요 (docs/subdomain-runbook.md §5).`,
-  );
+  await reportProtection(projectId);
+}
+
+/**
+ * 접근 보호 상태.
+ *
+ * ⚠️ **Vercel 기본값이 함정이다.** `ssoProtection.deploymentType` 의 기본값은
+ *    `all_except_custom_domains` 로, 프리뷰만 막고 **커스텀 도메인은 그대로
+ *    열어 둔다.** 서브도메인을 붙이는 순간 보호 밖으로 나가는 셈이다.
+ *    실측으로 확인했다 (2026-08-27, speciai-dash 프로젝트).
+ *
+ *    이 대시보드는 조직 전체 지출과 **거래처별 API 키 이름**(lawsync·devcowork·
+ *    legalmask·yulam 등 고객사 이름)을 그대로 띄운다. 열어 두면 안 된다.
+ */
+async function reportProtection(projectId) {
+  const p = await api(`/v9/projects/${projectId}?${q}`);
+  const sso = p.body?.ssoProtection;
+  const pw = p.body?.passwordProtection;
+
+  const customDomainCovered =
+    sso?.deploymentType === "all" || pw?.deploymentType === "all";
+
+  console.log(`\n접근 보호: SSO=${JSON.stringify(sso ?? null)} 비밀번호=${JSON.stringify(pw ?? null)}`);
+
+  if (customDomainCovered) {
+    console.log(`✅ 커스텀 도메인도 보호됩니다.`);
+    return;
+  }
+
+  console.log(`
+⚠️  ${FQDN} 는 **아무나 볼 수 있습니다.**
+    ${sso ? `현재 설정 "${sso.deploymentType}" 은 프리뷰만 막고 커스텀 도메인은 엽니다.` : "보호가 꺼져 있습니다."}
+    이 화면에는 조직 전체 AI 지출과 거래처별 API 키 이름이 그대로 뜹니다.
+
+    켜기:  node scripts/attach_subdomain.mjs ${sub} ${projectName} --protect
+    (또는 Vercel → Settings → Deployment Protection → Vercel Authentication
+     → **All Deployments** 선택. "Standard Protection" 은 커스텀 도메인을 뺍니다)`);
+}
+
+/** ssoProtection 을 커스텀 도메인까지 덮도록 올린다. */
+async function enableProtection(projectId) {
+  const res = await api(`/v9/projects/${projectId}?${q}`, {
+    method: "PATCH",
+    body: JSON.stringify({ ssoProtection: { deploymentType: "all" } }),
+  });
+  if (!res.ok) {
+    console.error(`❌ 보호 설정 실패 (HTTP ${res.status}):`, JSON.stringify(res.body).slice(0, 300));
+    process.exit(1);
+  }
+  console.log(`✅ Vercel Authentication 을 **모든 배포**(커스텀 도메인 포함)로 올렸습니다.`);
+  console.log(`   이제 팀 멤버로 로그인해야 ${FQDN} 가 보입니다.`);
 }

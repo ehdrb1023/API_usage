@@ -96,11 +96,19 @@ node scripts/attach_subdomain.mjs api api-usage --check
 
 현재 토큰으로 `team_6eAGhw…` 를 조회하면 **403** 입니다 — 접근 권한이 없습니다.
 
-해결은 둘 중 하나입니다.
+**다만 팀이 달라도 붙일 수는 있습니다.** Vercel 은 다른 팀 소유 도메인이어도
+`_vercel` TXT 레코드로 소유권을 증명하면 서브도메인을 받아 줍니다. 그때는 CNAME
+전에 TXT 를 먼저 넣어야 하고, 스크립트가 그 값을 출력합니다
+("먼저 아래 검증 레코드를 넣어야 합니다").
 
+정리하면 선택지는 셋입니다.
+
+- **그 팀 토큰으로 붙인다** — `api-usage` 가 있는 팀 scope 로 토큰을 발급해
+  `.env` 의 `VERCEL_API_TOKEN`·`VERCEL_TEAM_ID` 를 바꾸고, TXT 검증 레코드를 거쳐
+  붙인다. 프로젝트를 안 건드려도 됩니다.
 - **프로젝트를 도메인이 있는 팀으로** — `kimlawtech's projects` 에서 새로 만들어
-  배포하고 `.vercel/project.json` 을 다시 링크한다. 다른 서비스들이 전부 이 팀에
-  있으므로 **이쪽이 정석입니다.**
+  배포하고 `.vercel/project.json` 을 다시 링크한다. 다른 서비스 61개가 전부 이 팀에
+  있으므로 장기적으로는 이쪽이 깔끔합니다.
 - **도메인을 프로젝트가 있는 팀으로** — `speciai.kr` 를 통째로 옮긴다. 이미 붙어 있는
   `speciai.kr`·`www`·`linktalk` 이 전부 영향을 받으므로 **권합니다: 하지 마세요.**
 
@@ -116,14 +124,39 @@ node scripts/attach_subdomain.mjs api api-usage --check
 법률 쪽 고객사 이름이 섞여 있어 그냥 공개할 성격이 아닙니다. 붙이기 전에 셋 중
 하나를 정하세요.
 
-| 방법 | 어떻게 | 비고 |
-|---|---|---|
-| **Vercel Deployment Protection** | Settings → Deployment Protection → Standard/Password | 코드 수정 없음. **가장 빠릅니다** |
-| Vercel Authentication (SSO) | 같은 화면에서 팀 멤버만 허용 | 팀 계정으로 로그인해야 보임 |
-| 앱에 인증 추가 | 코드 작업 | 외부에 열어야 할 때만 |
+### ⚠️ Vercel 기본값이 함정입니다
 
-내부용이면 **Deployment Protection 이 정답입니다.** 서브도메인은 그대로 쓰면서
-로그인/비밀번호 없이는 아무것도 안 보입니다.
+실측 결과(2026-08-27), Vercel 프로젝트의 기본 보호 설정은 이렇습니다.
+
+```
+ssoProtection: { "deploymentType": "all_except_custom_domains" }
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+**프리뷰 배포만 막고 커스텀 도메인은 엽니다.** 즉 서브도메인을 붙이는 순간
+보호 밖으로 나갑니다. 대시보드에서 "Standard Protection" 으로 보이는 게 이 값입니다.
+
+커스텀 도메인까지 덮으려면 `deploymentType` 이 **`all`** 이어야 합니다.
+
+```bash
+node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> --protect
+```
+
+대시보드로 하려면 Settings → Deployment Protection → Vercel Authentication →
+**All Deployments** 를 고릅니다.
+
+| 방법 | 커스텀 도메인 보호 | 비고 |
+|---|---|---|
+| Standard Protection (기본) | ❌ **안 됨** | 프리뷰만 막습니다 |
+| Vercel Authentication + All Deployments | ✅ | 팀 멤버 로그인 필요. **내부용 정답** |
+| Password Protection + All Deployments | ✅ | 비밀번호 공유. 팀 밖 사람도 줄 때 |
+| 앱에 인증 추가 | ✅ | 코드 작업. 외부에 일부만 열 때 |
+
+확인:
+
+```bash
+node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> --check
+# → "접근 보호: SSO={...}" 줄에서 deploymentType 을 봅니다
 
 ## 6. `speciai.team` 은 어떻게 하나
 
