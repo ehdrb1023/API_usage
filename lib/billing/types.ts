@@ -64,7 +64,7 @@ export type BillingConfig = {
   vendorRules: VendorRule[];
 };
 
-/** 파서가 만들어 내는 한 건. Supabase `billing_receipts` 와 같은 모양이다. */
+/** 파서가 만들어 내는 한 건. `data/billing/receipts.json` 의 한 줄과 같은 모양이다. */
 export type Receipt = {
   vendor: string;
   kind: ChargeKind;

@@ -1,4 +1,4 @@
-# 영수증 자동 정리 — 결제 메일 → Supabase
+# 영수증 자동 정리 — 결제 메일 → JSON
 
 증빙용이다. 매달 "요금제로 얼마, API 로 얼마" 를 답하고, 각 건마다 **어느 카드로
 냈는지**와 **원본 영수증 PDF** 를 갖고 있는 게 목표다.
@@ -11,7 +11,7 @@
 | 확인된 벤더 | Anthropic(구독·환불·결제실패), OpenAI(충전), Stripe 재판매사(Deep Infra·Meshy) |
 | 확인된 카드 | 끝 **4411** 하나 (OpenAI·Deep Infra 공통) |
 | 파서 | `lib/billing/parse-receipt.ts` — 실제 메일 본문으로 20개 테스트 통과 |
-| 저장소 | Supabase `billing` 스키마 (`supabase/migrations/0001_billing.sql`) |
+| 저장소 | **JSON 파일** (`data/billing/`, gitignore) — 아래 참고 |
 | 수집 | Claude 스케줄 루틴 (Gmail MCP) — 아래 절차 |
 
 ## 메일함을 바꾸려면
@@ -37,7 +37,7 @@
 ### 갈아타는 동안 중복이 안 나는 이유
 
 전환기에 같은 영수증이 두 주소로 들어올 수 있습니다. 중복 판정 키
-(`billing.receipts.dedupe_key`)에 **메일함을 일부러 넣지 않았습니다** — 넣으면 서로
+(`receiptKey()`)에 **메일함을 일부러 넣지 않았습니다** — 넣으면 서로
 다른 건으로 보여 그 달 지출이 두 배가 됩니다. 키는 벤더가 매긴 영수증 번호이고,
 번호가 없는 OpenAI 충전 메일만 (벤더·날짜·금액·카드)로 대체합니다.
 
@@ -63,7 +63,7 @@
 - 자체 템플릿을 쓰는 벤더면 `lib/billing/parse-receipt.ts` 의 `TEMPLATES` 에
   파서를 추가하고 `TemplateId` 에 이름을 넣습니다.
 
-못 읽은 메일은 버리지 않고 `billing.unparsed_mail` 에 쌓입니다. 거기가 곧
+못 읽은 메일은 버리지 않고 `data/billing/unparsed.json` 에 쌓입니다. 거기가 곧
 "새 벤더 발견 목록" 입니다.
 
 ## 수집 절차 (Claude 루틴)
@@ -74,9 +74,10 @@
    → `{from:mail.anthropic.com from:tm.openai.com from:stripe.com} newer_than:90d`
 2. Gmail 에서 스레드를 검색하고, 각 메시지를 `PLAIN_TEXT` 로 받는다
 3. `parseMail()` 에 넣는다
-   - 성공 → `billing.receipts` 에 `dedupe_key` 충돌 시 무시(upsert do nothing)
-   - 실패 → `billing.unparsed_mail` 에 사유와 함께 남긴다
-4. 새로 들어온 `card_last4` 가 `billing.cards` 에 없으면 **사람에게 묻는다.**
+   - 성공 → `data/billing/receipts.json` 에 추가. `receiptKey()` 가 같은 건이 이미
+     있으면 **건너뛴다**
+   - 실패 → `data/billing/unparsed.json` 에 사유와 함께 남긴다
+4. 새로 들어온 `card_last4` 가 `data/billing/cards.json` 에 없으면 **사람에게 묻는다.**
    자동으로 만들지 않는다 — 카드 이름은 추측할 수 없다
 5. `kind = 'unknown'` 이 생겼으면 보고한다
 6. 증빙 PDF 는 첨부 파일명이 `attachments` 에 남는다. 파일 자체가 필요하면
@@ -94,14 +95,16 @@
 
 ## 월별 비교 읽는 법
 
-`billing.monthly` 뷰가 벤더·월별로 네 칸을 줍니다.
+월별 집계는 `receipts.json` 을 `kind` 로 갈라 더하면 나옵니다. 칸은 넷입니다.
 
-| 칸 | 뜻 |
+| `kind` | 뜻 |
 |---|---|
-| `subscription_usd` | 요금제. **쓰든 안 쓰든 나간 돈** |
-| `api_usage_usd` | API 후불. 쓴 만큼 |
-| `prepaid_topup_usd` | API 선불 충전 |
-| `credit_note_usd` | 환불 (음수) |
+| `subscription` | 요금제. **쓰든 안 쓰든 나간 돈** |
+| `api_usage` | API 후불. 쓴 만큼 |
+| `prepaid_topup` | API 선불 충전 |
+| `credit_note` | 환불 (음수) |
+
+`failed` 와 `unknown` 은 합계에 넣지 않습니다.
 
 > ⚠️ **선불 충전을 API 사용액과 더하지 마세요.** $10 을 충전해 석 달에 걸쳐 쓰면
 > 충전한 달에 $10 이 통째로 잡힙니다. 현금흐름으로는 맞지만 "이 달에 API 를 얼마나
