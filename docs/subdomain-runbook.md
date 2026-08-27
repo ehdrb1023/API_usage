@@ -76,41 +76,37 @@ node scripts/attach_subdomain.mjs api api-usage --check
 
 1. Vercel 프로젝트를 **`kimlawtech's projects` 팀에** 만든다 (§4)
 2. 배포한다
-3. **공개해도 되는 서비스인지 판단한다** (§5) — 아니면 보호부터 켠다
-4. `attach_subdomain.mjs` 실행
-5. hosting.kr 에 CNAME 추가
-6. `--check` 로 확인
+3. **공개해도 되는 서비스인지 판단한다** (§5)
+4. 아니면 **잠금을 먼저 배포한다** (`proxy.ts` + `DASHBOARD_PASSWORD`)
+   ⚠️ 순서가 중요합니다. DNS 를 먼저 걸면 잠금이 배포될 때까지 열려 있습니다
+5. `attach_subdomain.mjs` 실행
+6. hosting.kr 에 CNAME 추가
+7. `--check` 와 실제 접속으로 확인
 
 ## 4. 가장 흔한 함정 — 팀이 다르면 안 붙습니다
 
 **Vercel 도메인은 팀에 묶여 있습니다.** `speciai.kr` 는 `kimlawtech's projects` 팀
-소유이므로, **다른 팀에 있는 프로젝트에는 붙일 수 없습니다.**
+소유이므로, 다른 팀 프로젝트에는 그냥 못 붙입니다.
 
-이 레포가 지금 딱 그 상태입니다:
+> **이 레포는 2026-08-27 에 겪고 해결했습니다.** `api-usage` 가 `ehdrb1024` 팀에
+> 있어서 토큰이 403 이었고, 프로젝트를 `kimlawtech's projects` 로 **이전(Transfer)**
+> 해서 풀었습니다. 이전해도 `projectId` 는 그대로고 `orgId` 만 바뀝니다.
+>
+> 어느 계정 소유인지 모를 때는 `.env.local` 의 `VERCEL_OIDC_TOKEN` 을 열어 보세요.
+> JWT 페이로드의 `owner`·`owner_id`·`project` 에 그대로 적혀 있습니다.
 
-```
-.vercel/project.json → api-usage,  팀 team_6eAGhw1JOZdjD9cr6n3VMSSp
-.env VERCEL_TEAM_ID  →             팀 team_C0AdBRyMHlgH9ZIS4AbT253T  (speciai.kr 소유)
-                                   ↑ 서로 다름
-```
+선택지는 셋입니다.
 
-현재 토큰으로 `team_6eAGhw…` 를 조회하면 **403** 입니다 — 접근 권한이 없습니다.
+- **프로젝트를 도메인이 있는 팀으로 이전** — Settings → Advanced → Transfer Project.
+  나머지 서비스 61개가 전부 이 팀에 있으므로 **이쪽이 정석입니다.**
+- **그 팀 토큰으로 붙인다** — Vercel 은 다른 팀 소유 도메인이어도 `_vercel` TXT
+  레코드로 소유권을 증명하면 서브도메인을 내줍니다. CNAME 전에 TXT 를 먼저 넣어야
+  하고, 스크립트가 그 값을 출력합니다.
+- **도메인을 프로젝트가 있는 팀으로** — `speciai.kr`·`www`·`linktalk` 이 전부 영향을
+  받습니다. **권하지 않습니다.**
 
-**다만 팀이 달라도 붙일 수는 있습니다.** Vercel 은 다른 팀 소유 도메인이어도
-`_vercel` TXT 레코드로 소유권을 증명하면 서브도메인을 받아 줍니다. 그때는 CNAME
-전에 TXT 를 먼저 넣어야 하고, 스크립트가 그 값을 출력합니다
-("먼저 아래 검증 레코드를 넣어야 합니다").
-
-정리하면 선택지는 셋입니다.
-
-- **그 팀 토큰으로 붙인다** — `api-usage` 가 있는 팀 scope 로 토큰을 발급해
-  `.env` 의 `VERCEL_API_TOKEN`·`VERCEL_TEAM_ID` 를 바꾸고, TXT 검증 레코드를 거쳐
-  붙인다. 프로젝트를 안 건드려도 됩니다.
-- **프로젝트를 도메인이 있는 팀으로** — `kimlawtech's projects` 에서 새로 만들어
-  배포하고 `.vercel/project.json` 을 다시 링크한다. 다른 서비스 61개가 전부 이 팀에
-  있으므로 장기적으로는 이쪽이 깔끔합니다.
-- **도메인을 프로젝트가 있는 팀으로** — `speciai.kr` 를 통째로 옮긴다. 이미 붙어 있는
-  `speciai.kr`·`www`·`linktalk` 이 전부 영향을 받으므로 **권합니다: 하지 마세요.**
+⚠️ 이전한 뒤에는 로컬 `.vercel/project.json` 의 `orgId` 가 낡습니다. `vercel link` 를
+다시 하거나 값을 직접 고치세요.
 
 ## 5. ⚠️ 공개 전에 — 이 대시보드는 인증이 없습니다
 
@@ -124,7 +120,31 @@ node scripts/attach_subdomain.mjs api api-usage --check
 법률 쪽 고객사 이름이 섞여 있어 그냥 공개할 성격이 아닙니다. 붙이기 전에 셋 중
 하나를 정하세요.
 
-### ⚠️ Vercel 기본값이 함정입니다
+### ⚠️ 결론 먼저 — 이 요금제에서는 Vercel 설정으로 못 막습니다
+
+2026-08-27 실측:
+
+```
+PATCH /v9/projects/{id}  ssoProtection.deploymentType = "all"
+  → 428  "Vercel Authentication is not available on your plan for production deployments"
+
+PATCH /v9/projects/{id}  ssoProtection.deploymentType = "prod_deployment_urls_and_all_previews"
+  → 200 ✅
+```
+
+즉 `*.vercel.app` URL 과 프리뷰까지만 막히고 **커스텀 도메인은 보호 밖**입니다.
+그래서 이 프로젝트는 **앱에서 막습니다** — 루트의 `proxy.ts` 가 HTTP Basic 인증을
+겁니다 (판정 로직은 `lib/dashboard-auth.ts`, 테스트 14개).
+
+```
+DASHBOARD_PASSWORD 를 Vercel 환경변수에 넣는다
+  → 없으면 개발은 통과, **운영은 503 으로 잠긴다** (실수로 공개되는 것보다 낫다)
+```
+
+새 서비스도 민감한 데이터를 띄운다면 같은 방식을 쓰세요. `proxy.ts` 와
+`lib/dashboard-auth.ts` 를 그대로 복사하면 됩니다.
+
+### 참고 — Vercel 기본값도 함정입니다
 
 실측 결과(2026-08-27), Vercel 프로젝트의 기본 보호 설정은 이렇습니다.
 
@@ -147,10 +167,10 @@ node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> --protect
 
 | 방법 | 커스텀 도메인 보호 | 비고 |
 |---|---|---|
-| Standard Protection (기본) | ❌ **안 됨** | 프리뷰만 막습니다 |
-| Vercel Authentication + All Deployments | ✅ | 팀 멤버 로그인 필요. **내부용 정답** |
-| Password Protection + All Deployments | ✅ | 비밀번호 공유. 팀 밖 사람도 줄 때 |
-| 앱에 인증 추가 | ✅ | 코드 작업. 외부에 일부만 열 때 |
+| Standard Protection (기본) | ❌ | 프리뷰만 막습니다 |
+| Vercel Authentication + All Deployments | ❌ | **이 요금제에서 428 로 거부됩니다** |
+| Password Protection | 유료 애드온 | Pro 에서 별도 과금 |
+| **앱에서 막기 (`proxy.ts`)** | ✅ | 지금 쓰는 방식. 요금제와 무관 |
 
 확인:
 
