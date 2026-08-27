@@ -20,6 +20,9 @@ tmp/
 # API 응답 — 워크스페이스 ID·API 키 ID·프로젝트명 등 조직 내부 식별자가 들어감
 responses/*.json
 responses/*.jsonl
+# 키 인벤토리(scripts/scan_key_inventory.mjs)도 여기 떨어진다 — 값은 없지만
+# 프로젝트 이름·구성이 통째로 들어가므로 마찬가지로 커밋하지 않는다.
+responses/*.md
 !responses/.gitkeep
 
 # python 캐시
