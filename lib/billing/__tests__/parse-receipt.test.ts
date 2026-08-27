@@ -266,10 +266,17 @@ describe("중복 판정 키", () => {
 describe("종류 판정", () => {
   it("요금제·API·충전을 가른다", () => {
     assert.equal(classifyKind("Max plan - 20x"), "subscription");
+    // ── 2026-08-27 Anthropic 실측 품목 ──
+    assert.equal(classifyKind("One-time credit purchase"), "prepaid_topup");
     assert.equal(classifyKind("ChatGPT Pro subscription"), "subscription");
     assert.equal(classifyKind("Prepayment"), "prepaid_topup");
     assert.equal(classifyKind("API credit top-up"), "prepaid_topup");
     assert.equal(classifyKind("Claude API usage"), "api_usage");
+  });
+
+  it('**"Prepaid extra usage, Individual plan" 은 요금제가 아니라 선불이다**', () => {
+    // "plan" 이 들어 있어서 순서를 잘못 두면 구독으로 잡힌다. 실제 품목이다.
+    assert.equal(classifyKind("Prepaid extra usage, Individual plan"), "prepaid_topup");
   });
 
   it("**못 가르면 unknown 이다** — 넘겨짚지 않는다", () => {

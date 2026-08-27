@@ -66,6 +66,29 @@
 못 읽은 메일은 버리지 않고 `data/billing/unparsed.json` 에 쌓입니다. 거기가 곧
 "새 벤더 발견 목록" 입니다.
 
+## 돌리는 법
+
+```bash
+# 1) Gmail 검색어 확인 (config/billing-sources.json 에서 만들어집니다)
+node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/collect_receipts.mjs --query
+
+# 2) Claude 가 그 검색어로 메일을 긁어 아래 형식의 JSON 으로 덤프
+#    [{ messageId, mailbox, sender, subject, date, plaintextBody, attachments? }]
+
+# 3) 파싱·중복제거·저장·집계
+node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/collect_receipts.mjs mails.json
+
+# 저장된 것만 다시 보기
+node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/collect_receipts.mjs --summary
+```
+
+### 왜 스크립트가 Gmail 을 직접 안 읽나
+
+Gmail 접근은 Claude 쪽 연동(MCP)이라 Node 스크립트에서 부를 수 없습니다. 앱에 Gmail
+API 를 직접 붙이려면 Google Cloud 프로젝트 + OAuth 동의화면 + 리프레시 토큰 관리가
+따라오는데, 월 5~10건 읽자고 치르기엔 비쌉니다. 그래서 **역할을 나눴습니다** —
+메일을 긁는 건 Claude, 파싱·저장·집계는 스크립트입니다.
+
 ## 수집 절차 (Claude 루틴)
 
 주 1회 정도면 충분합니다 — 결제는 월 단위라 자주 돌 이유가 없습니다.

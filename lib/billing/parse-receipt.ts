@@ -149,8 +149,22 @@ export function classifyKind(lineItem: string | null, subject?: string): ChargeK
   const text = `${lineItem ?? ""} ${subject ?? ""}`.toLowerCase();
   if (!text.trim()) return "unknown";
 
-  // 선불 충전을 구독보다 먼저 본다 — "credit" 이 양쪽에 다 나온다.
-  if (/prepay|prepaid|top-?up|funded|credit balance|재충전|충전/.test(text)) {
+  /**
+   * 선불 충전을 구독보다 **먼저** 본다.
+   *
+   * ⚠️ 순서가 중요하다. Anthropic 의 실제 품목 중 하나가
+   *    `"Prepaid extra usage, Individual plan"` 인데, "plan" 이 들어 있어서
+   *    구독을 먼저 보면 요금제로 잘못 잡힌다. 선불이 먼저다.
+   *
+   * 실측 품목 (2026-08-27):
+   *    "One-time credit purchase"            $500  API 크레딧 선불 구매
+   *    "Prepaid extra usage, Individual plan" $200  선불 추가 사용분
+   *    "Prepayment"                            $5   Deep Infra
+   *    "API credit top-up"                    $10   OpenAI 충전
+   */
+  if (
+    /prepay|prepaid|top-?up|funded|credit balance|credit purchase|재충전|충전/.test(text)
+  ) {
     return "prepaid_topup";
   }
   if (/\bplan\b|subscription|max plan|pro plan|team plan|seat|구독|요금제/.test(text)) {
