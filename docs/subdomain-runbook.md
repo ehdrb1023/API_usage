@@ -157,6 +157,7 @@ node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> --protect
 ```bash
 node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> --check
 # → "접근 보호: SSO={...}" 줄에서 deploymentType 을 봅니다
+```
 
 ## 6. `speciai.team` 은 어떻게 하나
 
