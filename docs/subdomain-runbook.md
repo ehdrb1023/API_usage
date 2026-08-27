@@ -68,9 +68,17 @@ TTL    : 3600
 전파는 보통 5~30분입니다.
 
 ```bash
-nslookup -type=CNAME api.speciai.kr        # cname.vercel-dns.com 이 나와야 함
+# 로컬 리졸버는 "없음" 을 캐시하고 있을 수 있으므로 공인 DNS 에 직접 묻는다.
+# (nslookup 이 없는 환경이 있어 node 로 확인한다)
+node -e 'const{Resolver}=require("node:dns");const r=new Resolver();r.setServers(["8.8.8.8"]);
+r.resolveCname("api.speciai.kr",(e,a)=>console.log(e?e.code:a))'
+#   → [ "cname.vercel-dns.com" ] 이 나와야 합니다
+
 node scripts/attach_subdomain.mjs api api-usage --check
 ```
+
+> ⚠️ DNS 가 퍼진 뒤에도 몇 분간 TLS 핸드셰이크가 실패할 수 있습니다. Vercel 이
+> 인증서를 발급하는 중입니다. `SSL_ERROR_SYSCALL` 이 보이면 조금 기다리세요.
 
 ## 3. 새 서비스 만들 때 순서
 
@@ -108,21 +116,22 @@ node scripts/attach_subdomain.mjs api api-usage --check
 ⚠️ 이전한 뒤에는 로컬 `.vercel/project.json` 의 `orgId` 가 낡습니다. `vercel link` 를
 다시 하거나 값을 직접 고치세요.
 
-## 5. ⚠️ 공개 전에 — 이 대시보드는 인증이 없습니다
+## 5. 공개 여부 판단
 
-`api.speciai.kr` 를 그냥 붙이면 **주소를 아는 사람 누구나** 다음을 봅니다.
+서브도메인을 붙이면 **주소를 아는 누구나** 그 화면을 봅니다. 붙이기 전에 한 번 판단하세요.
 
-- 조직 전체 AI 지출액
-- **거래처별 API 키 이름** — 실제로 `lawsync`, `devcowork`, `legalmask`, `yulam`,
-  `Gccity`, `crm` 같은 **고객사·프로젝트 이름이 그대로 화면에 뜹니다**
-- 모델별·일자별 사용 패턴
+> **이 대시보드(api.speciai.kr)는 2026-08-27 에 잠금 없이 공개하기로 결정했습니다.**
+> 화면에 조직 전체 AI 지출액과 거래처별 API 키 이름(`lawsync`·`devcowork`·`legalmask`
+> ·`yulam` 등)이 뜬다는 점을 확인한 뒤 내린 결정입니다. 이전에 넣었던 `proxy.ts`
+> Basic 인증과 `DASHBOARD_PASSWORD` 는 같은 날 걷어냈습니다.
+>
+> 되살리려면 `git show dfa422a` 에 `proxy.ts` + `lib/dashboard-auth.ts` + 테스트
+> 14개가 통째로 들어 있습니다.
 
-법률 쪽 고객사 이름이 섞여 있어 그냥 공개할 성격이 아닙니다. 붙이기 전에 셋 중
-하나를 정하세요.
+### 잠가야 하는 서비스라면
 
-### ⚠️ 결론 먼저 — 이 요금제에서는 Vercel 설정으로 못 막습니다
-
-2026-08-27 실측:
+⚠️ **Vercel Deployment Protection 으로는 커스텀 도메인을 못 막습니다.**
+2026-08-27 실측 (Pro 요금제):
 
 ```
 PATCH /v9/projects/{id}  ssoProtection.deploymentType = "all"
@@ -132,51 +141,22 @@ PATCH /v9/projects/{id}  ssoProtection.deploymentType = "prod_deployment_urls_an
   → 200 ✅
 ```
 
-즉 `*.vercel.app` URL 과 프리뷰까지만 막히고 **커스텀 도메인은 보호 밖**입니다.
-그래서 이 프로젝트는 **앱에서 막습니다** — 루트의 `proxy.ts` 가 HTTP Basic 인증을
-겁니다 (판정 로직은 `lib/dashboard-auth.ts`, 테스트 14개).
-
-```
-DASHBOARD_PASSWORD 를 Vercel 환경변수에 넣는다
-  → 없으면 개발은 통과, **운영은 503 으로 잠긴다** (실수로 공개되는 것보다 낫다)
-```
-
-새 서비스도 민감한 데이터를 띄운다면 같은 방식을 쓰세요. `proxy.ts` 와
-`lib/dashboard-auth.ts` 를 그대로 복사하면 됩니다.
-
-### 참고 — Vercel 기본값도 함정입니다
-
-실측 결과(2026-08-27), Vercel 프로젝트의 기본 보호 설정은 이렇습니다.
-
-```
-ssoProtection: { "deploymentType": "all_except_custom_domains" }
-                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
-```
-
-**프리뷰 배포만 막고 커스텀 도메인은 엽니다.** 즉 서브도메인을 붙이는 순간
-보호 밖으로 나갑니다. 대시보드에서 "Standard Protection" 으로 보이는 게 이 값입니다.
-
-커스텀 도메인까지 덮으려면 `deploymentType` 이 **`all`** 이어야 합니다.
-
-```bash
-node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> --protect
-```
-
-대시보드로 하려면 Settings → Deployment Protection → Vercel Authentication →
-**All Deployments** 를 고릅니다.
+즉 `*.vercel.app` URL 과 프리뷰까지만 막히고 커스텀 도메인은 보호 밖입니다.
+대시보드에서 "Standard Protection" 으로 보이는 것도 이 값입니다.
 
 | 방법 | 커스텀 도메인 보호 | 비고 |
 |---|---|---|
 | Standard Protection (기본) | ❌ | 프리뷰만 막습니다 |
-| Vercel Authentication + All Deployments | ❌ | **이 요금제에서 428 로 거부됩니다** |
+| Vercel Authentication + All Deployments | ❌ | 이 요금제에서 428 |
 | Password Protection | 유료 애드온 | Pro 에서 별도 과금 |
-| **앱에서 막기 (`proxy.ts`)** | ✅ | 지금 쓰는 방식. 요금제와 무관 |
+| Vercel Firewall IP 허용목록 | ✅ | 고정 IP 가 있을 때. 입력 절차 없음 |
+| 앱에서 막기 (`proxy.ts`) | ✅ | 요금제와 무관. `git show dfa422a` 에 예시 |
 
-확인:
+현재 보호 상태 확인:
 
 ```bash
 node scripts/attach_subdomain.mjs <서브도메인> <프로젝트> --check
-# → "접근 보호: SSO={...}" 줄에서 deploymentType 을 봅니다
+# → "접근 보호: SSO={...}" 줄의 deploymentType 을 봅니다
 ```
 
 ## 6. `speciai.team` 은 어떻게 하나
