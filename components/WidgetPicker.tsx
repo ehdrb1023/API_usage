@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import {
   COST_METRIC_KEY,
@@ -48,25 +48,36 @@ export default function WidgetPicker({ snapshot: given, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const snapshot = given ?? fetched;
 
-  // 미니 창은 스냅샷을 이미 갖고 있다. 대시보드에서 열렸을 때만, 그리고 **딱 한 번만**
-  // 받아온다 — `given` 은 미니 창에서 1분마다 새 객체가 되므로 그대로 의존성에 두면
-  // 창을 열어 둔 내내 분당 한 번씩 헛 요청이 나간다.
-  const fetchedOnce = useRef(false);
+  // 미니 창은 스냅샷을 이미 갖고 있다. 대시보드에서 열렸을 때만 받아온다.
+  //
+  // ⚠️ 의존성은 `given` 자체가 아니라 **`given` 이 있느냐**다. 미니 창은 1분마다 새
+  //    객체를 넘기므로 `given` 을 그대로 두면 창을 열어 둔 내내 분당 한 번씩 헛
+  //    요청이 나간다. 불린으로 바꾸면 그 재실행이 사라진다.
+  //
+  // ⚠️ 예전에는 `useRef` 로 "딱 한 번" 을 막았다. 그런데 StrictMode 는 이펙트를
+  //    실행→정리→재실행 시키기 때문에, **첫 실행의 응답은 정리 단계에서 버려지고
+  //    재실행은 ref 에 걸려 되돌아나가** 목록이 영영 "불러오는 중" 에서 멈췄다.
+  //    미니 창은 `given` 이 있어 이 경로를 아예 안 타서 대시보드에서만 증상이 났다.
+  //    "한 번만" 은 ref 가 아니라 **안정적인 의존성**으로 지켜야 한다.
+  const needsFetch = !given;
   useEffect(() => {
-    if (given || fetchedOnce.current) return;
-    fetchedOnce.current = true;
-    let alive = true;
-    fetch("/api/live", { cache: "no-store" })
+    if (!needsFetch) return;
+    const controller = new AbortController();
+
+    fetch("/api/live", { cache: "no-store", signal: controller.signal })
       .then(async (res) => {
         const body = await res.json();
         if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-        if (alive) setFetched(body as LiveSnapshot);
+        setFetched(body as LiveSnapshot);
       })
-      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
-    return () => {
-      alive = false;
-    };
-  }, [given]);
+      .catch((e) => {
+        // 정리 단계에서 끊은 요청은 실패가 아니다 — 에러 문구를 띄우면 안 된다.
+        if (controller.signal.aborted) return;
+        setError(e instanceof Error ? e.message : String(e));
+      });
+
+    return () => controller.abort();
+  }, [needsFetch]);
 
   const raw = useSyncExternalStore(subscribeLines, readLines, readLinesOnServer);
   const lines = useMemo(() => parseLines(raw), [raw]);
