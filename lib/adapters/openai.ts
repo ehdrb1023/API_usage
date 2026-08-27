@@ -30,10 +30,17 @@
  *    api_key_id 로 못 쪼개는 것과 같은 제약이고, 대응도 같다 — 단가를 역산해
  *    (`lib/token-rates.ts`) KST 실측 토큰에 곱한다.
  *
- * 6. **보조 축이 API 키가 아니라 프로젝트다.** OpenAI 는 조직 전체 API 키를 한 번에
- *    나열하는 엔드포인트가 없고(프로젝트별로만 조회 가능), 과금·권한의 단위가
- *    프로젝트다. 그래서 Claude 탭의 "API 키별" 자리에 GPT 탭은 "프로젝트별" 이 온다.
- *    코어의 보조 축(`UsageRow.keyId`)에 project_id 를 넣는 것으로 끝난다.
+ * 6. **보조 축은 API 키다. 다만 이름을 모으는 길이 다르다.** usage/completions 는
+ *    `group_by=api_key_id` 를 지원하므로 사용량 자체는 Claude 탭과 똑같이 키 단위로
+ *    쪼개진다. 문제는 **이름**이다 — OpenAI 에는 조직 전체 키를 한 번에 주는
+ *    엔드포인트가 없어서(Anthropic 은 `/v1/organizations/api_keys` 하나로 끝난다),
+ *    프로젝트를 먼저 나열하고 프로젝트마다
+ *    `/v1/organization/projects/{id}/api_keys` 를 다시 두드려야 한다.
+ *
+ *    키가 안 붙는 사용분(콘솔·비 API 트래픽)은 `api_key_id` 가 null 로 오는데,
+ *    그때는 **project_id 로 떨어뜨린다.** 전부 "콘솔" 한 덩어리로 뭉치는 것보다
+ *    어느 프로젝트 몫인지라도 남는 편이 낫기 때문이다. 이름 매핑에는 키 id 와
+ *    프로젝트 id 가 함께 들어가므로 어느 쪽이 와도 이름이 붙는다.
  */
 
 import {
@@ -134,8 +141,9 @@ export function toUsageRows(results: OpenAiUsageResult[]): UsageRow[] {
 
     return {
       model: r.model ?? null,
-      // 보조 축은 프로젝트다 (위 6번). 프로젝트가 없으면 콘솔 직접 사용으로 본다.
-      keyId: r.project_id ?? null,
+      // 보조 축은 API 키다 (위 6번). 키가 안 붙는 사용분은 프로젝트로 떨어뜨리고,
+      // 그것마저 없으면 콘솔 직접 사용으로 본다.
+      keyId: r.api_key_id ?? r.project_id ?? null,
       metrics: {
         inputTokens: uncached,
         cacheReadTokens: cached,

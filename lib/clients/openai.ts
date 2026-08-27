@@ -25,8 +25,11 @@ import {
   type OpenAiCostBucket,
   type OpenAiCostsParams,
   type OpenAiCostsResponse,
+  type OpenAiListProjectApiKeysParams,
   type OpenAiListProjectsParams,
   type OpenAiProject,
+  type OpenAiProjectApiKey,
+  type OpenAiProjectApiKeysResponse,
   type OpenAiProjectsResponse,
   type OpenAiUsageBucket,
   type OpenAiUsageParams,
@@ -37,6 +40,10 @@ import {
 export const OPENAI_USAGE_COMPLETIONS_PATH = "/v1/organization/usage/completions";
 export const OPENAI_COSTS_PATH = "/v1/organization/costs";
 export const OPENAI_PROJECTS_PATH = "/v1/organization/projects";
+
+/** ⚠️ 프로젝트마다 따로 두드려야 한다. 조직 전체를 한 번에 주는 경로는 없다. */
+export const openAiProjectApiKeysPath = (projectId: string): string =>
+  `/v1/organization/projects/${encodeURIComponent(projectId)}/api_keys`;
 
 export const DEFAULT_OPENAI_API_BASE = "https://api.openai.com";
 
@@ -330,6 +337,37 @@ export async function fetchAllOpenAiProjects(
   }
 
   throw new Error(`OpenAI ${OPENAI_PROJECTS_PATH}: 페이지가 ${MAX_PAGES}개를 넘었습니다.`);
+}
+
+// ------------------------------------------------------- 프로젝트별 API 키 목록
+
+/** 프로젝트 하나의 API 키 전부. */
+export async function fetchAllOpenAiProjectApiKeys(
+  projectId: string,
+  params: OpenAiListProjectApiKeysParams = {},
+  options: OpenAiClientOptions = {},
+): Promise<OpenAiProjectApiKey[]> {
+  const config = resolveOpenAiConfig(options);
+  const path = openAiProjectApiKeysPath(projectId);
+  const keys: OpenAiProjectApiKey[] = [];
+  let after: string | undefined = params.after;
+
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const body: OpenAiProjectApiKeysResponse = await getJson<OpenAiProjectApiKeysResponse>(
+      path,
+      { limit: PROJECTS_PAGE_LIMIT, ...params, after },
+      config,
+    );
+
+    const page = body.data ?? [];
+    keys.push(...page);
+
+    const nextAfter = body.last_id ?? page[page.length - 1]?.id;
+    if (!body.has_more || !nextAfter) return keys;
+    after = nextAfter;
+  }
+
+  throw new Error(`OpenAI ${path}: 페이지가 ${MAX_PAGES}개를 넘었습니다.`);
 }
 
 // ---------------------------------------------------------------- 유틸

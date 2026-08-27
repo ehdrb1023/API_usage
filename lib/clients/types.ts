@@ -487,6 +487,41 @@ export interface OpenAiListProjectsParams {
   include_archived?: boolean;
 }
 
+/**
+ * GET /v1/organization/projects/{project_id}/api_keys 의 한 건.
+ *
+ * ⚠️ OpenAI 는 **조직 전체 API 키를 한 번에 주는 엔드포인트가 없다.** 프로젝트를
+ *    먼저 나열하고 프로젝트마다 이 경로를 다시 두드려야 전체 키 이름이 모인다.
+ *    (Anthropic 은 `/v1/organizations/api_keys` 하나로 끝난다 — 다른 점이다.)
+ */
+export interface OpenAiProjectApiKey {
+  object: "organization.project.api_key";
+  id: string;
+  name: string | null;
+  /** 예: "sk-...def". 마스킹된 값이라 화면에 띄워도 된다. */
+  redacted_value?: string | null;
+  created_at: number;
+  owner?: {
+    type?: string;
+    user?: { id?: string; name?: string } | null;
+    service_account?: { id?: string; name?: string } | null;
+  } | null;
+}
+
+export interface OpenAiProjectApiKeysResponse {
+  object: "list";
+  data: OpenAiProjectApiKey[];
+  first_id?: string | null;
+  last_id?: string | null;
+  has_more: boolean;
+}
+
+/** 프로젝트 목록과 같은 after + limit 방식이다. */
+export interface OpenAiListProjectApiKeysParams {
+  limit?: number;
+  after?: string;
+}
+
 /** OpenAI 표준 에러 봉투. */
 export interface OpenAiErrorResponse {
   error: {

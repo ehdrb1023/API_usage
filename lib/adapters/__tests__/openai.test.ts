@@ -63,16 +63,31 @@ describe("입력 토큰 정규화 (Anthropic 과 뜻 맞추기)", () => {
     assert.equal(row.metrics.inputTokens, 0);
   });
 
-  it("보조 축은 프로젝트다 — project_id 가 없으면 콘솔 직접 사용으로 본다", () => {
-    const [withProject] = toUsageRows([
+  it("보조 축은 API 키다 — api_key_id 가 project_id 를 이긴다", () => {
+    const [row] = toUsageRows([
+      {
+        model: "gpt-5",
+        project_id: "proj_a",
+        api_key_id: "key_abc",
+        input_tokens: 1,
+        output_tokens: 0,
+      },
+    ]);
+
+    assert.equal(row.keyId, "key_abc");
+  });
+
+  it("api_key_id 가 없으면 프로젝트로, 그것도 없으면 콘솔로 떨어진다", () => {
+    const [projectOnly] = toUsageRows([
       { model: "gpt-5", project_id: "proj_a", input_tokens: 1, output_tokens: 0 },
     ]);
-    const [without] = toUsageRows([
+    const [neither] = toUsageRows([
       { model: "gpt-5", input_tokens: 1, output_tokens: 0 },
     ]);
 
-    assert.equal(withProject.keyId, "proj_a");
-    assert.equal(without.keyId, null);
+    // 전부 "콘솔" 한 덩어리로 뭉개지 않는다 — 어느 프로젝트 몫인지는 남긴다.
+    assert.equal(projectOnly.keyId, "proj_a");
+    assert.equal(neither.keyId, null);
   });
 });
 

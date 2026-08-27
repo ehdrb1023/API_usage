@@ -47,6 +47,7 @@ import {
 } from "@/lib/clients/anthropic";
 import {
   fetchAllOpenAiCostBuckets,
+  fetchAllOpenAiProjectApiKeys,
   fetchAllOpenAiProjects,
   fetchAllOpenAiUsageBuckets,
   hasOpenAiCredentials,
@@ -207,13 +208,13 @@ const OPENAI: ServiceDefinition = {
   label: "GPT",
   breakdownLabel: "모델",
   altBreakdown: {
-    label: "프로젝트",
+    label: "API 키",
     notice:
-      "OpenAI 는 과금·권한 단위가 프로젝트라, Claude 탭의 'API 키별' 자리에 " +
-      "'프로젝트별' 이 옵니다. 키 단위로 더 잘게 보려면 프로젝트를 나눠야 합니다.",
+      "이름은 '프로젝트 / 키' 로 표시됩니다. 키가 안 붙는 사용분(콘솔·비 API 트래픽)은 " +
+      "api_key_id 가 비어서 오기 때문에 그 프로젝트 몫으로 묶입니다.",
     note:
-      "costs 는 모델로 나눌 수 없어(group_by 는 line_item·project_id 뿐), " +
-      "프로젝트별 비용은 같은 날·같은 모델·같은 토큰 종류의 토큰 수 비율로 안분한 " +
+      "costs 는 모델로도 키로도 나눌 수 없어(group_by 는 line_item·project_id 뿐), " +
+      "키별 비용은 같은 날·같은 모델·같은 토큰 종류의 토큰 수 비율로 안분한 " +
       "추정치입니다. 토큰 수는 usage 실측값입니다.",
   },
   metricSpecs: OPENAI_METRICS,
@@ -233,7 +234,7 @@ const OPENAI: ServiceDefinition = {
         end_time: toUnixSeconds(to),
         bucket_width: "1h",
         limit: 168,
-        group_by: ["model", "project_id"],
+        group_by: ["model", "project_id", "api_key_id"],
       }),
       // ⚠️ costs 는 1d 뿐이고 model 로 group_by 할 수 없다 (Anthropic 과 같은 제약).
       //    화면에 직접 나가지 않고 **단가 역산에만** 쓴다.
@@ -245,7 +246,7 @@ const OPENAI: ServiceDefinition = {
         limit: 180,
         group_by: ["line_item", "project_id"],
       }),
-      openaiProjectNames(),
+      openaiKeyNames(),
     ]);
 
     return {
@@ -263,7 +264,7 @@ const OPENAI: ServiceDefinition = {
       end_time: toUnixSeconds(to),
       bucket_width: "1h",
       limit: 24,
-      group_by: ["model", "project_id"],
+      group_by: ["model", "project_id", "api_key_id"],
     });
     return buckets.flatMap((b) => openaiUsageRows(b.results));
   },
@@ -277,11 +278,23 @@ const OPENAI: ServiceDefinition = {
   unverified: OPENAI_UNVERIFIED,
 };
 
-/** 프로젝트 id → 이름. Anthropic 의 키 이름 조회와 같은 원칙으로 실패를 삼킨다. */
-async function openaiProjectNames(): Promise<KeyMeta[]> {
+/**
+ * API 키 id → 이름, 그리고 프로젝트 id → 이름. **한 배열에 둘 다 담는다.**
+ *
+ * OpenAI 에는 조직 전체 키를 주는 엔드포인트가 없어서 프로젝트를 먼저 나열하고
+ * 프로젝트마다 키 목록을 다시 두드린다. 프로젝트가 N 개면 요청이 N+1 번이라
+ * 하루 1회 캐시(`lib/data-source.ts`) 안에서만 돈다.
+ *
+ * 프로젝트 항목도 함께 넣는 이유는 `api_key_id` 가 비어 오는 사용분(콘솔·비 API
+ * 트래픽)이 project_id 로 떨어지기 때문이다 (`lib/adapters/openai.ts` 6번).
+ *
+ * Anthropic 의 키 이름 조회와 같은 원칙으로 **실패를 삼킨다** — 이름은 부가
+ * 정보라 목록 하나 때문에 탭 전체가 죽으면 안 된다.
+ */
+async function openaiKeyNames(): Promise<KeyMeta[]> {
+  let projects: Awaited<ReturnType<typeof fetchAllOpenAiProjects>>;
   try {
-    const projects = await fetchAllOpenAiProjects();
-    return projects.map((p) => ({ id: p.id, name: p.name, status: p.status }));
+    projects = await fetchAllOpenAiProjects();
   } catch (error) {
     console.warn(
       "[services] OpenAI 프로젝트 목록 실패 — 이름 없이 id 로 표시합니다.",
@@ -289,6 +302,38 @@ async function openaiProjectNames(): Promise<KeyMeta[]> {
     );
     return [];
   }
+
+  const metas: KeyMeta[] = projects.map((p) => ({
+    id: p.id,
+    name: p.name,
+    status: p.status,
+  }));
+
+  const perProject = await Promise.all(
+    projects.map(async (p) => {
+      try {
+        const keys = await fetchAllOpenAiProjectApiKeys(p.id);
+        return keys.map(
+          (k): KeyMeta => ({
+            id: k.id,
+            // 프로젝트를 앞에 붙인다 — 키 이름은 프로젝트끼리 겹치는 일이 흔하다.
+            name: `${p.name} / ${k.name ?? k.id}`,
+            // 키 목록에는 상태 필드가 없다. 프로젝트가 보관되면 키도 못 쓴다.
+            status: p.status,
+            partial_key_hint: k.redacted_value ?? null,
+          }),
+        );
+      } catch (error) {
+        console.warn(
+          `[services] OpenAI 프로젝트 ${p.id} 의 키 목록 실패 — id 로 표시합니다.`,
+          error instanceof Error ? error.message : error,
+        );
+        return [];
+      }
+    }),
+  );
+
+  return metas.concat(...perProject);
 }
 
 // ============================================================================
