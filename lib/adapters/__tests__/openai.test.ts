@@ -46,8 +46,8 @@ describe("입력 토큰 정규화 (Anthropic 과 뜻 맞추기)", () => {
     // 안 빼면 총 토큰이 캐시만큼 부풀려진다.
     assert.equal(row.metrics.inputTokens, 6 * MTOK);
     assert.equal(row.metrics.cacheReadTokens, 4 * MTOK);
-    assert.equal(row.tokens[OPENAI_TOKEN_KINDS.input], 6 * MTOK);
-    assert.equal(row.tokens[OPENAI_TOKEN_KINDS.cached], 4 * MTOK);
+    assert.equal(row.tokens[OPENAI_TOKEN_KINDS.input("text")], 6 * MTOK);
+    assert.equal(row.tokens[OPENAI_TOKEN_KINDS.cached("text")], 4 * MTOK);
   });
 
   it("문서와 달리 캐시가 이미 빠져 있어도 음수가 되지 않는다", () => {
@@ -100,7 +100,7 @@ describe("금액 단위", () => {
     assert.equal(rows.length, 1);
     assert.equal(rows[0].usd, 12.5);
     assert.equal(rows[0].model, "gpt-5");
-    assert.equal(rows[0].tokenKind, OPENAI_TOKEN_KINDS.output);
+    assert.equal(rows[0].tokenKind, OPENAI_TOKEN_KINDS.output("text"));
   });
 
   it("line_item 을 못 알아보면 토큰 비례가 아닌 비용으로 남긴다", () => {
@@ -182,5 +182,147 @@ describe("집계", () => {
     })[0];
 
     assert.equal(point.altItems?.[0].label, "○○상사 GPT");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// 아래는 **2026-08-27 에 실제 조직 계정에서 뽑은 line_item 34종**이다.
+// 손으로 지어낸 값이 아니라 실측이라, 이게 깨지면 벤더가 형식을 바꾼 것이다.
+// ─────────────────────────────────────────────────────────────────────────
+
+import { normalizeModel } from "../openai";
+
+/** [line_item, 기대 model, 기대 tokenKind] */
+const REAL_LINE_ITEMS: [string, string, string | null][] = [
+  ["gpt-image-1 image, output", "gpt-image-1", "image.output"],
+  ["gpt-image-1 image, input", "gpt-image-1", "image.input"],
+  ["gpt-image-1 image, cached input", "gpt-image-1", "image.cached_input"],
+  ["gpt-image-1 text, input", "gpt-image-1", "text.input"],
+  ["gpt-image-1 text, cached input", "gpt-image-1", "text.cached_input"],
+  ["gpt-image-2-2026-04-21 image, output", "gpt-image-2", "image.output"],
+  ["gpt-image-2-2026-04-21 image, input", "gpt-image-2", "image.input"],
+  ["gpt-image-2-2026-04-21 text, input", "gpt-image-2", "text.input"],
+  ["gpt-image-2-2026-04-21 text, output", "gpt-image-2", "text.output"],
+  ["gpt-5.6-terra, output", "gpt-5.6-terra", "text.output"],
+  ["gpt-5.6-terra, input", "gpt-5.6-terra", "text.input"],
+  ["gpt-5.6-terra, cached input", "gpt-5.6-terra", "text.cached_input"],
+  ["gpt-5.6-terra, cache writes", "gpt-5.6-terra", "cache_writes"],
+  ["gpt-5.4-2026-03-05, output", "gpt-5.4", "text.output"],
+  ["gpt-5.4-2026-03-05, cached input", "gpt-5.4", "text.cached_input"],
+  ["gpt-4o-2024-08-06, output", "gpt-4o", "text.output"],
+  ["gpt-5-mini-2025-08-07, input", "gpt-5-mini", "text.input"],
+  ["gpt-5.4-nano-2026-03-17, output", "gpt-5.4-nano", "text.output"],
+  ["whisper", "whisper", null],
+];
+
+describe("line_item 파싱 — 실측 34종", () => {
+  for (const [raw, model, kind] of REAL_LINE_ITEMS) {
+    it(JSON.stringify(raw), () => {
+      const [row] = toCostRows([{ amount: { value: 1, currency: "usd" }, line_item: raw }]);
+      assert.equal(row.model, model);
+      assert.equal(row.tokenKind, kind);
+    });
+  }
+
+  it("**캐시 쓰기와 캐시 읽기를 섞지 않는다** — 단가가 다르다", () => {
+    const [write] = toCostRows([
+      { amount: { value: 1, currency: "usd" }, line_item: "gpt-5.6-terra, cache writes" },
+    ]);
+    const [read] = toCostRows([
+      { amount: { value: 1, currency: "usd" }, line_item: "gpt-5.6-terra, cached input" },
+    ]);
+    assert.notEqual(write.tokenKind, read.tokenKind);
+  });
+
+  it("모달리티가 모델명에 섞여 들어가지 않는다", () => {
+    const [row] = toCostRows([
+      { amount: { value: 1, currency: "usd" }, line_item: "gpt-image-1 image, output" },
+    ]);
+    // "gpt-image-1 image" 라는 모델은 존재하지 않는다.
+    assert.equal(row.model, "gpt-image-1");
+  });
+});
+
+describe("모델 이름 정규화 — usage 와 costs 를 잇는다", () => {
+  it("**양쪽이 서로 다른 이름을 주는 실제 사례가 같은 이름으로 모인다**", () => {
+    // usage 에만 날짜가 붙는 경우
+    assert.equal(normalizeModel("gpt-image-1-2025-04-23"), normalizeModel("gpt-image-1"));
+    // costs 에만 날짜가 붙는 경우 (방향이 반대다)
+    assert.equal(normalizeModel("gpt-image-2"), normalizeModel("gpt-image-2-2026-04-21"));
+    // 양쪽 같은 경우
+    assert.equal(normalizeModel("gpt-4o-2024-08-06"), "gpt-4o");
+  });
+
+  it("날짜가 아닌 접미사는 건드리지 않는다", () => {
+    assert.equal(normalizeModel("gpt-5.6-terra"), "gpt-5.6-terra");
+    assert.equal(normalizeModel("gpt-5.4-nano-2026-03-17"), "gpt-5.4-nano");
+    assert.equal(normalizeModel(null), null);
+  });
+
+  it("usage 행의 모델도 정규화된다 (안 하면 표가 두 줄로 갈린다)", () => {
+    const [row] = toUsageRows([
+      { model: "gpt-image-1-2025-04-23", input_tokens: 10, output_tokens: 5 },
+    ]);
+    assert.equal(row.model, "gpt-image-1");
+  });
+});
+
+describe("모달리티별 토큰 — costs 와 같은 축으로 쪼갠다", () => {
+  it("실측 응답 모양 그대로 쪼갠다", () => {
+    // 2026-08-27 gpt-image-2 실제 행
+    const [row] = toUsageRows([
+      {
+        model: "gpt-image-2",
+        input_tokens: 31,
+        input_cached_tokens: 0,
+        input_uncached_tokens: 31,
+        output_tokens: 1756,
+        input_text_tokens: 31,
+        input_image_tokens: 0,
+        output_text_tokens: 0,
+        output_image_tokens: 1756,
+      },
+    ]);
+    assert.equal(row.tokens["text.input"], 31);
+    assert.equal(row.tokens["image.output"], 1756);
+    // 0 인 축은 아예 넣지 않는다.
+    assert.equal(row.tokens["image.input"], undefined);
+  });
+
+  it("**모달리티 필드가 없어도 토큰이 증발하지 않는다** (text 로 몰아넣는다)", () => {
+    const [row] = toUsageRows([
+      { model: "gpt-5", input_tokens: 100, input_cached_tokens: 40, output_tokens: 20 },
+    ]);
+    assert.equal(row.tokens["text.input"], 60);
+    assert.equal(row.tokens["text.cached_input"], 40);
+    assert.equal(row.tokens["text.output"], 20);
+  });
+
+  it("input_uncached_tokens 를 벤더가 주면 그걸 쓴다", () => {
+    // 실측: input 27444 / cached 8448 / uncached 18996
+    const [row] = toUsageRows([
+      {
+        model: "gpt-5.6-terra",
+        input_tokens: 27444,
+        input_cached_tokens: 8448,
+        input_uncached_tokens: 18996,
+        output_tokens: 5123,
+      },
+    ]);
+    assert.equal(row.metrics.inputTokens, 18996);
+    assert.equal(row.tokens["text.input"], 18996);
+  });
+
+  it("캐시 생성 토큰을 따로 센다", () => {
+    const [row] = toUsageRows([
+      {
+        model: "gpt-5.6-terra",
+        input_tokens: 100,
+        input_cached_tokens: 0,
+        output_tokens: 0,
+        input_cache_write_tokens: 77,
+      },
+    ]);
+    assert.equal(row.tokens["cache_writes"], 77);
   });
 });

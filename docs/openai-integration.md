@@ -1,9 +1,14 @@
 # GPT(OpenAI) 연동 — 실키 붙일 때 하는 일
 
-> **상태: 자리만 마련됨 (2026-08-26).**
-> 코드는 다 있고 `.env` 에 `OPENAI_ADMIN_KEY` 를 넣으면 GPT 탭이 켜집니다.
-> 다만 **경로·파라미터·응답 필드가 전부 공개 문서 기준이고 실응답으로 검증되지
-> 않았습니다.** 이 문서는 그 확인 절차입니다.
+> **상태: 실키 검증 완료 (2026-08-27).**
+> `node scripts/verify_openai.mjs` 19/19 통과. 경로·필드명·페이지네이션·금액 단위·
+> `group_by=api_key_id` 전부 실응답으로 확인했습니다.
+>
+> 같은 날 실측 데이터로 **파서 결함 4건을 찾아 고쳤습니다** (§1-6 참고). 고친 뒤
+> 60일치 기준 단가 조인 매칭률이 **금액 기준 100%** 입니다.
+>
+> **남은 것**: 단가 역산의 오차 폭을 아직 측정하지 못했습니다 (Anthropic 은
+> hold-out 검증으로 ±0.1% 확인). §2 마지막 항목.
 
 ## 왜 별도 문서인가 — 틀려도 티가 안 나기 때문
 
@@ -102,7 +107,49 @@ $0.01 수준이 아니라 **100배 차이**가 나는지만 보면 됩니다.
 
 **고칠 곳:** `lib/adapters/openai.ts` 의 `toUsageRows()`.
 
-### 1-6. `line_item` 실제 형식
+### 1-6. `line_item` 실제 형식 — ✅ 확인 완료, 파서 고침
+
+**2026-08-27 실측 34종.** 형식은 `"<모델>[ <모달리티>], <방향>"` 입니다.
+
+```
+"gpt-5.6-terra, output"                 모달리티 없음(텍스트 전용)
+"gpt-5.6-terra, cached input"           캐시 읽기
+"gpt-5.6-terra, cache writes"           캐시 생성 — 읽기와 단가가 다르다
+"gpt-image-1 image, output"             모달리티가 모델명 뒤에 붙는다
+"gpt-image-2-2026-04-21 text, input"    날짜가 붙기도 한다
+"whisper"                               쉼표 없음 + quantity_unit 이 duration_seconds
+```
+
+여기서 **결함 4건**이 드러났고 전부 고쳤습니다.
+
+1. **모달리티가 모델명에 섞였다** — `"gpt-image-1 image"` 라는 없는 모델이 생김
+2. **캐시 쓰기/읽기를 한 덩어리로 봤다** — 단가가 다른데 합쳐짐 (절대규칙 3번 위반)
+3. **usage 와 costs 의 모델 이름이 다르다** — 아래 참고
+4. **`whisper` 는 토큰이 아니다** — `quantity_unit` 이 초 단위
+
+#### 모델 이름이 양쪽에서 다르다 — 방향도 일정하지 않다
+
+```
+usage "gpt-image-1-2025-04-23"   costs "gpt-image-1"             날짜가 usage 에만
+usage "gpt-image-2"              costs "gpt-image-2-2026-04-21"  날짜가 costs 에만
+usage "gpt-4o-2024-08-06"        costs "gpt-4o-2024-08-06"       양쪽 같음
+```
+
+한쪽만 맞추면 다른 쪽이 깨지므로 **양쪽에서 끝의 `-YYYY-MM-DD` 를 뗍니다**
+(`normalizeModel`). 안 맞추면 단가 조인이 실패해 조용히 블렌디드로 떨어지고,
+모델별 표에 같은 모델이 두 줄(토큰만/비용만)로 갈립니다.
+
+#### 덤으로 알아낸 것
+
+- `costs` 응답에 **`quantity` + `quantity_unit`** 이 있습니다. 단가 = 금액 ÷ 수량으로
+  바로 나오므로 역산 정확도를 더 올릴 여지가 있습니다 (아직 안 씀).
+- `costs` 에서 **`group_by=api_key_id` 가 동작합니다** (문서에 없음). 키별 비용을
+  안분 추정이 아니라 실측으로 낼 수 있습니다 (아직 안 씀).
+- `usage` 가 **`input_uncached_tokens`** 를 직접 줍니다. 빼서 만들 필요가 없습니다.
+- 입력 쪽 모달리티 필드는 **캐시를 제외한 값**입니다 (실측: 27444-8448=18996).
+
+<details><summary>원래 체크리스트 (참고용)</summary>
+
 
 - [ ] 원문에서 `line_item` 값들을 전부 수집한다
 
@@ -120,6 +167,8 @@ print(sorted({r.get('line_item') for b in d['data'] for r in b['results']}))
 - [ ] 안 맞으면 파서를 고치고, 실제 값 목록을 `docs/api-response-notes.md` 3절에 적는다
 
 **고칠 곳:** `lib/adapters/openai.ts` 의 `parseLineItem()`.
+
+</details>
 
 ### 1-7. 페이지네이션과 limit
 

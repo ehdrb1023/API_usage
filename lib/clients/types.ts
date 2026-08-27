@@ -390,11 +390,39 @@ export interface OpenAiPage<TBucket> {
 
 export interface OpenAiUsageResult {
   object: "organization.usage.completions.result";
-  /** ⚠️ `input_cached_tokens` 를 **포함한** 총 입력. 어댑터에서 빼서 정규화한다. */
+  /** ✅ 2026-08-27 실측: `input_cached_tokens` 를 **포함한** 총 입력이 맞다. */
   input_tokens: number;
   input_cached_tokens?: number;
+  /**
+   * ✅ 실측 확인 — 캐시를 뺀 입력을 **벤더가 직접 준다.**
+   * `input_tokens - input_cached_tokens` 와 값이 같다 (27444-8448=18996).
+   * 직접 빼는 것보다 이 값을 쓰는 편이 안전하다.
+   */
+  input_uncached_tokens?: number;
+  /** 캐시 **생성**. 캐시 읽기(`input_cached_tokens`)와 단가가 다르다. */
+  input_cache_write_tokens?: number;
   output_tokens: number;
   num_model_requests?: number;
+
+  /**
+   * ── 모달리티별 내역 ──────────────────────────────────────────────────
+   * ⚠️ **입력 쪽 모달리티 필드는 캐시를 제외한 값이다** (2026-08-27 실측:
+   *    gpt-5.6-terra 가 input 27444 / cached 8448 인데 text+image+audio 합이
+   *    18996 = uncached 와 일치). 캐시분은 `input_cached_*_tokens` 에 따로 있다.
+   *
+   * costs 의 `line_item` 이 "gpt-image-1 image, output" 처럼 모달리티까지 나눠서
+   * 오기 때문에, 단가를 제대로 붙이려면 사용량도 같은 축으로 쪼개야 한다.
+   */
+  input_text_tokens?: number;
+  input_image_tokens?: number;
+  input_audio_tokens?: number;
+  input_cached_text_tokens?: number;
+  input_cached_image_tokens?: number;
+  input_cached_audio_tokens?: number;
+  output_text_tokens?: number;
+  output_image_tokens?: number;
+  output_audio_tokens?: number;
+  service_tier?: string | null;
   project_id?: string | null;
   user_id?: string | null;
   api_key_id?: string | null;
@@ -435,9 +463,29 @@ export interface OpenAiCostAmount {
 export interface OpenAiCostResult {
   object: "organization.costs.result";
   amount: OpenAiCostAmount;
-  /** 예: "gpt-4o-2024-08-06, input". ⚠️ 실제 형식 미검증. */
+  /**
+   * ✅ 2026-08-27 실측 형식: `"<모델>[ <모달리티>], <방향>"`
+   *
+   *   "gpt-5.6-terra, output"                  모달리티 없음(텍스트 전용 모델)
+   *   "gpt-5.6-terra, cached input"            캐시 읽기
+   *   "gpt-5.6-terra, cache writes"            캐시 **생성** — 단가가 다르다
+   *   "gpt-image-1 image, output"              모달리티가 모델명 뒤에 붙는다
+   *   "gpt-image-2-2026-04-21 text, input"     날짜가 붙기도 한다
+   *   "whisper"                                쉼표 없음 + quantity_unit 이 초 단위
+   */
   line_item?: string | null;
   project_id?: string | null;
+  /** ✅ 문서에 없지만 `group_by=api_key_id` 가 실제로 동작한다 (2026-08-27 실측). */
+  api_key_id?: string | null;
+  /**
+   * ✅ 실측 확인 — **과금 수량을 같이 준다.** 단가 = amount.value / quantity 로
+   * 바로 나오므로 역산 정확도가 크게 올라간다.
+   */
+  quantity?: number;
+  /** "tokens" | "duration_seconds" … ⚠️ 토큰이 아닌 항목이 섞여 온다 (whisper). */
+  quantity_unit?: string | null;
+  project_name?: string | null;
+  organization_id?: string | null;
 }
 
 export interface OpenAiCostBucket {

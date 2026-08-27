@@ -75,26 +75,85 @@ export const OPENAI_BUILD: BuildOptions = {
   totalOf: ["inputTokens", "cacheReadTokens", "outputTokens"],
 };
 
-/** 과금 축(token kind). Anthropic 의 `token_type` 에 대응한다. */
+/**
+ * 과금 축(token kind). Anthropic 의 `token_type` 에 대응한다.
+ *
+ * ⚠️ **화면 지표가 아니다.** 단가 역산과 비용 안분에만 쓴다 (절대규칙 3번).
+ *
+ * ── 왜 모달리티까지 쪼개는가 ───────────────────────────────────────────────
+ * costs 의 `line_item` 이 `"gpt-image-1 image, output"` 처럼 **모달리티별로**
+ * 나뉘어 오고 단가도 서로 다르다. 사용량을 같은 축으로 안 쪼개면 이미지 출력
+ * 단가가 텍스트 출력에 섞여 조용히 틀린다. 실제로 이미지 출력이 이 조직 지출의
+ * 대부분($25 / $27)이라 무시할 수 없다.
+ */
 export const OPENAI_TOKEN_KINDS = {
-  input: "input_tokens_uncached",
-  cached: "input_cached_tokens",
-  output: "output_tokens",
+  /** 캐시를 타지 않은 입력. */
+  input: (modality: Modality) => `${modality}.input`,
+  /** 캐시 **읽기**. */
+  cached: (modality: Modality) => `${modality}.cached_input`,
+  output: (modality: Modality) => `${modality}.output`,
+  /**
+   * 캐시 **생성**. 읽기와 단가가 다르다 — 합치면 절대규칙 3번 위반이다.
+   * 모달리티로 안 쪼개진다 (벤더가 `input_cache_write_tokens` 하나만 준다).
+   */
+  cacheWrite: "cache_writes",
 } as const;
 
-/** GET /v1/organization/usage/completions 의 결과 행. */
+export type Modality = "text" | "image" | "audio";
+
+/**
+ * 모델 이름 정규화 — **usage 와 costs 가 서로 다른 이름을 준다.**
+ *
+ * 2026-08-27 실측:
+ *   usage "gpt-image-1-2025-04-23"      costs "gpt-image-1"            (날짜가 usage 에만)
+ *   usage "gpt-image-2"                 costs "gpt-image-2-2026-04-21" (날짜가 costs 에만)
+ *   usage "gpt-4o-2024-08-06"           costs "gpt-4o-2024-08-06"      (양쪽 같음)
+ *
+ * **방향이 일정하지 않아** 한쪽만 맞추면 다른 쪽이 깨진다. 그래서 양쪽에서
+ * 끝의 `-YYYY-MM-DD` 를 떼어 같은 이름으로 만든다. 안 맞추면 단가 조인이 실패해
+ * 조용히 블렌디드 단가로 떨어지고, 화면의 모델별 표에는 같은 모델이 **두 줄**로
+ * 나온다 (한 줄은 토큰만, 다른 줄은 비용만).
+ *
+ * 대가: 같은 모델의 날짜별 버전이 한 줄로 합쳐진다. 버전마다 단가가 다르면
+ * 그만큼 섞이지만, 아예 매칭이 안 되는 것보다는 훨씬 낫다.
+ */
+export function normalizeModel(model: string | null): string | null {
+  if (!model) return null;
+  return model.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+}
+
+/**
+ * GET /v1/organization/usage/completions 의 결과 행.
+ * 필드는 `lib/clients/types.ts` 의 같은 이름 타입과 맞춰 둔다 (2026-08-27 실측 기준).
+ */
 export type OpenAiUsageResult = {
   object?: string;
   /** group_by 에 model 이 없으면 null/undefined. */
   model?: string | null;
-  /** group_by 에 project_id 가 없으면 null. 보조 축(= 거래처)으로 쓴다. */
+  /** group_by 에 project_id 가 없으면 null. */
   project_id?: string | null;
   api_key_id?: string | null;
-  /** ⚠️ `input_cached_tokens` 를 **포함한** 총 입력. 위 4번 참고. */
+
+  /** ✅ `input_cached_tokens` 를 **포함한** 총 입력 (실측 확인). */
   input_tokens: number;
   input_cached_tokens?: number;
+  /** ✅ 캐시를 뺀 입력을 벤더가 직접 준다. 없으면 빼서 만든다. */
+  input_uncached_tokens?: number;
+  /** 캐시 **생성**. 읽기와 단가가 다르다. */
+  input_cache_write_tokens?: number;
   output_tokens: number;
   num_model_requests?: number;
+
+  /** ⚠️ 입력 쪽 모달리티 필드는 **캐시를 뺀 값**이다 (2026-08-27 실측). */
+  input_text_tokens?: number;
+  input_image_tokens?: number;
+  input_audio_tokens?: number;
+  input_cached_text_tokens?: number;
+  input_cached_image_tokens?: number;
+  input_cached_audio_tokens?: number;
+  output_text_tokens?: number;
+  output_image_tokens?: number;
+  output_audio_tokens?: number;
 };
 
 /** GET /v1/organization/costs 의 결과 행. */
@@ -102,9 +161,13 @@ export type OpenAiCostResult = {
   object?: string;
   /** ⚠️ **USD 실수**다. 센트가 아니다. */
   amount: { value: number; currency: string };
-  /** 예: "gpt-4o-2024-08-06, input". 형식 미검증 — 아래 파서 주석 참고. */
+  /** ✅ 실측 형식 `"<모델>[ <모달리티>], <방향>"` — `parseLineItem` 주석 참고. */
   line_item?: string | null;
   project_id?: string | null;
+  api_key_id?: string | null;
+  /** ✅ 과금 수량. 토큰이 아닌 항목(whisper)은 단위가 다르다. */
+  quantity?: number;
+  quantity_unit?: string | null;
 };
 
 export type OpenAiBucket<T> = {
@@ -128,27 +191,68 @@ export type OpenAiRaw = {
 /** usage 결과 행 → 공통 사용량 행. */
 export function toUsageRows(results: OpenAiUsageResult[]): UsageRow[] {
   return results.map((r) => {
-    const cached = r.input_cached_tokens ?? 0;
-    // ⚠️ 캐시 읽기를 빼서 Anthropic 과 같은 뜻으로 맞춘다 (위 4번).
-    //    음수 방지: 문서와 달리 input_tokens 가 캐시를 제외한 값일 가능성에 대비한다.
-    const uncached = Math.max(0, (r.input_tokens ?? 0) - cached);
-    const output = r.output_tokens ?? 0;
+    const n = (v: number | undefined | null) => (typeof v === "number" && v > 0 ? v : 0);
+
+    const total = n(r.input_tokens);
+    const cached = n(r.input_cached_tokens);
+    // 벤더가 직접 준다. 없으면(옛 응답) 빼서 만든다. 음수 방지는 그대로 둔다.
+    const uncached = r.input_uncached_tokens != null
+      ? n(r.input_uncached_tokens)
+      : Math.max(0, total - cached);
+    const output = n(r.output_tokens);
+    const cacheWrite = n(r.input_cache_write_tokens);
+
+    // ⚠️ 입력 쪽 모달리티 필드는 **캐시를 뺀 값**이다 (2026-08-27 실측).
+    const modalIn: Record<Modality, number> = {
+      text: n(r.input_text_tokens),
+      image: n(r.input_image_tokens),
+      audio: n(r.input_audio_tokens),
+    };
+    const modalCached: Record<Modality, number> = {
+      text: n(r.input_cached_text_tokens),
+      image: n(r.input_cached_image_tokens),
+      audio: n(r.input_cached_audio_tokens),
+    };
+    const modalOut: Record<Modality, number> = {
+      text: n(r.output_text_tokens),
+      image: n(r.output_image_tokens),
+      audio: n(r.output_audio_tokens),
+    };
+
+    /**
+     * 모달리티 합이 총계에 못 미치면 **남은 몫을 text 로 몰아넣는다.**
+     * 벤더가 모달리티 필드를 안 준 옛 응답이나 새 모달리티가 생겼을 때
+     * 토큰이 조용히 증발하는 걸 막는다. 총계는 언제나 보존된다.
+     */
+    const reconcile = (parts: Record<Modality, number>, expected: number) => {
+      const sum = parts.text + parts.image + parts.audio;
+      if (sum < expected) parts.text += expected - sum;
+      return parts;
+    };
+    reconcile(modalIn, uncached);
+    reconcile(modalCached, cached);
+    reconcile(modalOut, output);
 
     const tokens: Record<string, number> = {};
-    if (uncached > 0) tokens[OPENAI_TOKEN_KINDS.input] = uncached;
-    if (cached > 0) tokens[OPENAI_TOKEN_KINDS.cached] = cached;
-    if (output > 0) tokens[OPENAI_TOKEN_KINDS.output] = output;
+    for (const m of ["text", "image", "audio"] as Modality[]) {
+      if (modalIn[m] > 0) tokens[OPENAI_TOKEN_KINDS.input(m)] = modalIn[m];
+      if (modalCached[m] > 0) tokens[OPENAI_TOKEN_KINDS.cached(m)] = modalCached[m];
+      if (modalOut[m] > 0) tokens[OPENAI_TOKEN_KINDS.output(m)] = modalOut[m];
+    }
+    if (cacheWrite > 0) tokens[OPENAI_TOKEN_KINDS.cacheWrite] = cacheWrite;
 
     return {
-      model: r.model ?? null,
-      // 보조 축은 API 키다 (위 6번). 키가 안 붙는 사용분은 프로젝트로 떨어뜨리고,
+      // 이름을 정규화해야 costs 와 조인된다 (normalizeModel 주석 참고).
+      model: normalizeModel(r.model ?? null),
+      // 보조 축은 API 키다. 키가 안 붙는 사용분은 프로젝트로 떨어뜨리고,
       // 그것마저 없으면 콘솔 직접 사용으로 본다.
       keyId: r.api_key_id ?? r.project_id ?? null,
       metrics: {
+        // 화면 지표는 모달리티를 합친 값이다 (과금 축과 분리 — 절대규칙 3번).
         inputTokens: uncached,
         cacheReadTokens: cached,
         outputTokens: output,
-        requests: r.num_model_requests ?? 0,
+        requests: n(r.num_model_requests),
       },
       tokens,
     };
@@ -177,28 +281,65 @@ export function toCostRows(results: OpenAiCostResult[]): CostRow[] {
   return out;
 }
 
-/** "gpt-4o-2024-08-06, input" → { model, tokenKind }. 못 알아보면 둘 다 null. */
+/**
+ * `line_item` → { model, tokenKind }. **2026-08-27 실측 34종을 기준으로 썼다.**
+ *
+ *   "gpt-5.6-terra, output"                → gpt-5.6-terra      / text.output
+ *   "gpt-5.6-terra, cached input"          → gpt-5.6-terra      / text.cached_input
+ *   "gpt-5.6-terra, cache writes"          → gpt-5.6-terra      / cache_writes
+ *   "gpt-image-1 image, output"            → gpt-image-1        / image.output
+ *   "gpt-image-2-2026-04-21 text, input"   → gpt-image-2        / text.input
+ *   "whisper"                              → whisper            / null (토큰 아님)
+ *
+ * 모달리티가 없으면 텍스트 전용 모델이라는 뜻이라 `text` 로 본다.
+ * 못 알아본 항목은 `tokenKind: null` 로 두어 단가 역산에서 빠지고
+ * `nonTokenShare` 에 잡힌다 — 조용히 틀린 단가를 만드는 것보다 낫다.
+ */
 function parseLineItem(lineItem: string | null): {
   model: string | null;
   tokenKind: string | null;
 } {
   if (!lineItem) return { model: null, tokenKind: null };
 
-  const [head, tail] = lineItem.split(",", 2).map((s) => s.trim());
-  if (!tail) return { model: head || null, tokenKind: null };
+  const comma = lineItem.indexOf(",");
+  if (comma === -1) {
+    // "whisper" 처럼 방향이 없는 항목. 토큰 단위가 아닐 수 있다(초 단위 등).
+    return { model: normalizeModel(lineItem.trim()) || null, tokenKind: null };
+  }
 
-  const kind = tail.toLowerCase();
-  if (kind.includes("cach")) {
-    return { model: head, tokenKind: OPENAI_TOKEN_KINDS.cached };
+  const head = lineItem.slice(0, comma).trim();
+  const tail = lineItem.slice(comma + 1).trim().toLowerCase();
+
+  // 모달리티는 모델명 **뒤에 공백으로** 붙어 온다. 떼어내지 않으면
+  // "gpt-image-1 image" 라는 존재하지 않는 모델이 만들어진다.
+  let modality: Modality = "text";
+  let modelPart = head;
+  const lastSpace = head.lastIndexOf(" ");
+  if (lastSpace > 0) {
+    const suffix = head.slice(lastSpace + 1).toLowerCase();
+    if (suffix === "text" || suffix === "image" || suffix === "audio") {
+      modality = suffix;
+      modelPart = head.slice(0, lastSpace).trim();
+    }
   }
-  if (kind.includes("output")) {
-    return { model: head, tokenKind: OPENAI_TOKEN_KINDS.output };
+
+  const model = normalizeModel(modelPart) || null;
+
+  // ⚠️ 순서가 중요하다. "cached input" 과 "cache writes" 는 둘 다 "cach" 를
+  //    포함하지만 단가가 다르다. 쓰기를 먼저 걸러야 한다.
+  if (tail.includes("cache write")) {
+    return { model, tokenKind: OPENAI_TOKEN_KINDS.cacheWrite };
   }
-  if (kind.includes("input")) {
-    return { model: head, tokenKind: OPENAI_TOKEN_KINDS.input };
+  if (tail.includes("cached")) {
+    return { model, tokenKind: OPENAI_TOKEN_KINDS.cached(modality) };
   }
-  // 토큰이 아닌 항목(웹 검색·이미지 등). 단가 역산에서 빠지고 비중만 기록된다.
-  return { model: head, tokenKind: null };
+  if (tail.includes("output")) {
+    return { model, tokenKind: OPENAI_TOKEN_KINDS.output(modality) };
+  }
+  if (tail.includes("input")) {
+    return { model, tokenKind: OPENAI_TOKEN_KINDS.input(modality) };
+  }
+  return { model, tokenKind: null };
 }
 
 /** unix 초 → ISO 문자열. KST 접기는 ISO 만 다룬다. */
