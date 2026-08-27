@@ -37,3 +37,7 @@ __pycache__/
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+
+# 결제 내역·영수증·카드 — **실제 재무 데이터다. 절대 커밋 금지.**
+# (scripts/collect_receipts.mjs 가 여기에 씁니다)
+data/
