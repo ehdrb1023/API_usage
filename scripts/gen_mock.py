@@ -236,12 +236,14 @@ def build_anthropic(rng, all_days):
 def build_openai(rng, all_days):
     """OpenAI Admin API 응답.
 
-    ⚠️ 전부 **공개 문서 기준**이고 실응답으로 검증되지 않았다.
-       Anthropic 과 다른 점 세 가지가 목업에도 그대로 들어 있다:
+    ✅ 2026-08-27 실키로 검증한 스키마를 따른다 (docs/openai-integration.md).
+       Anthropic 과 다른 점:
          1. 시각이 unix 초 정수 (start_time / end_time)
          2. 금액이 USD 실수 (amount.value) — 센트가 아니다
          3. input_tokens 가 input_cached_tokens 를 **포함**한다
-       확인 절차는 docs/openai-integration.md.
+         4. 벤더가 input_uncached_tokens 를 직접 준다
+         5. 입력 쪽 모달리티 필드는 **캐시를 뺀** 값이다
+         6. line_item 이 "<모델>[ <모달리티>], <방향>" 형식이다
     """
     usage_buckets, cost_buckets = [], []
     total = len(all_days)
@@ -269,7 +271,20 @@ def build_openai(rng, all_days):
                     # ⚠️ 캐시를 **포함한** 총 입력 (위 3번). 어댑터가 빼서 정규화한다.
                     "input_tokens": uncached + cached,
                     "input_cached_tokens": cached,
+                    # 벤더가 직접 주는 값 (위 4번). 어댑터가 이걸 우선한다.
+                    "input_uncached_tokens": uncached,
+                    "input_cache_write_tokens": 0,
                     "output_tokens": output,
+                    # 모달리티별 내역 (위 5번) — 텍스트 전용 모델이라 전부 text 다.
+                    "input_text_tokens": uncached,
+                    "input_image_tokens": 0,
+                    "input_audio_tokens": 0,
+                    "input_cached_text_tokens": cached,
+                    "input_cached_image_tokens": 0,
+                    "input_cached_audio_tokens": 0,
+                    "output_text_tokens": output,
+                    "output_image_tokens": 0,
+                    "output_audio_tokens": 0,
                     "num_model_requests": int(base / 3_000 * rng.uniform(0.8, 1.2)),
                     "project_id": proj_id,
                     "user_id": None,
@@ -290,8 +305,14 @@ def build_openai(rng, all_days):
                     "object": "organization.costs.result",
                     # ⚠️ USD 실수. 100 으로 나누지 말 것 (위 2번).
                     "amount": {"value": round(usd, 6), "currency": "usd"},
+                    # 텍스트 전용 모델이라 모달리티가 없다 — 실측의 "gpt-5.6-terra, output" 형태.
+                    # 이미지 모델이면 "gpt-image-1 image, output" 처럼 모달리티가 붙는다.
                     "line_item": f"{model}, {label}",
                     "project_id": None,
+                    # 실응답에 있는 필드. 단가를 금액÷수량으로 바로 낼 수도 있다(아직 안 씀).
+                    "quantity": totals[kind],
+                    "quantity_unit": "tokens",
+                    "api_key_id": None,
                 })
 
         nxt = d + timedelta(days=1)

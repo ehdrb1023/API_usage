@@ -192,6 +192,9 @@ const daysCache = new Map<ServiceId, (kstDay: string) => Promise<VendorDays>>(
   SERVICES.map((service) => [
     service.id,
     unstable_cache(
+      // 값은 안 쓰지만 `unstable_cache` 의 **캐시 키를 하루 단위로 가르는** 인자다.
+      // 지우면 하루가 바뀌어도 캐시가 안 뚫려 어제 숫자가 계속 보인다.
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       async (_kstDay: string) => service.fetchDays(),
       [`vendor-days:${service.id}`],
       { revalidate: DAY_SECONDS, tags: ["usage", `usage:${service.id}`] },
