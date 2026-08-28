@@ -14,6 +14,8 @@ export default async function Page() {
   const mode = getDataSourceMode();
   // 실패해도 빈 배열이라 대시보드를 막지 않는다 (lib/vendors.ts 주석 참고).
   const vendors = await loadVendors();
+  // 탭에 띄울 개수 — Claude·GPT 는 자기 탭이 있으므로 뺀다.
+  const vendorCount = vendors.filter((v) => v.tier !== "primary").length;
 
   let series;
   try {
@@ -41,7 +43,7 @@ export default async function Page() {
   }
 
   return (
-    <Dashboard series={series} mode={mode}>
+    <Dashboard series={series} mode={mode} vendorCount={vendorCount}>
       {/*
         ⚠️ 금액은 아직 안 넘긴다. 영수증 수집이 `data/billing/` 에 쌓이면
         그때 벤더별 합계를 `spendByVendor` 로 넘기면 된다.

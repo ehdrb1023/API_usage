@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import BreakdownTable from "@/components/BreakdownTable";
 import DailyTable from "@/components/DailyTable";
 import RangePicker from "@/components/RangePicker";
-import ServiceTabs from "@/components/ServiceTabs";
+import ServiceTabs, { VENDORS_TAB, type TabValue } from "@/components/ServiceTabs";
 import StatCards from "@/components/StatCards";
 import TrendChart from "@/components/TrendChart";
 import WidgetPicker from "@/components/WidgetPicker";
@@ -34,9 +34,15 @@ type Props = {
    * `app/page.tsx` 가 끼워 넣는다.
    */
   children?: React.ReactNode;
+  /** "그 외 API" 탭에 표시할 벤더 수. 0 이면 탭이 안 뜬다. */
+  vendorCount?: number;
 };
 
-export default function Dashboard({ series, mode, children }: Props) {
+export default function Dashboard({ series, mode, children, vendorCount = 0 }: Props) {
+  /** 탭. 서비스 id 이거나 "그 외 API"(VENDORS_TAB) 다. */
+  const [tab, setTab] = useState<TabValue>("claude");
+  // 아래 계산은 전부 실제 서비스 기준이다. 벤더 탭일 때는 직전 서비스를 그대로 둔다
+  // (탭을 오갈 때 차트가 초기화되지 않게).
   const [service, setService] = useState<ServiceId>("claude");
   const [range, setRange] = useState<RangeId>("30d");
   /** 서비스별 표에서 선택한 API 키. null 이면 전체 합계를 본다. */
@@ -101,9 +107,11 @@ export default function Dashboard({ series, mode, children }: Props) {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <ServiceTabs
           services={series}
-          value={service}
+          value={tab}
+          vendorCount={vendorCount}
           onChange={(next) => {
-            setService(next);
+            setTab(next);
+            if (next !== VENDORS_TAB) setService(next);
             // 키는 서비스마다 다르므로 탭을 옮기면 선택을 푼다.
             setSelectedKey(null);
           }}
@@ -198,7 +206,13 @@ export default function Dashboard({ series, mode, children }: Props) {
         </div>
       )}
 
+      {tab === VENDORS_TAB ? (
+        // 그 외 API 는 시계열이 없다 — 목록만 그리고 차트·표는 건너뛴다.
+        children
+      ) : (
+        <>
       <StatCards series={active} kpis={view.kpis} range={range} anchor={view.anchor} />
+
 
       <div className="mt-6">
         <TrendChart
@@ -207,7 +221,9 @@ export default function Dashboard({ series, mode, children }: Props) {
           // 키를 고르면 제목이 그 키 이름으로 바뀐다 (config/client-keys.json 우선순위 그대로).
           subjectLabel={view.focusLabel ?? active.label}
           bounds={view.bounds}
-          usageBreakdown={active.service === "claude"}
+          // 두 서비스 모두 모델별 사용량을 주므로 막대로 쌓는다.
+          // (예전엔 GPT 가 미검증이라 Claude 만 켜 뒀는데, 2026-08-27 실키 검증으로 풀렸다)
+          usageBreakdown
           breakdownLabel={view.focusKey ? active.altBreakdown?.label : active.breakdownLabel}
           metricKey={active.primaryMetric}
         />
@@ -235,8 +251,8 @@ export default function Dashboard({ series, mode, children }: Props) {
         <DailyTable series={active} points={view.points} deltas={view.deltas} />
       </div>
 
-      {/* Claude·GPT 는 위 탭에서 상세히 본다. 나머지는 한 덩어리로 아래에. */}
-      {children}
+        </>
+      )}
 
       {/* 일 경계 경고는 상단 배너로 옮겼다. 여기엔 탭별 상세만 남긴다. */}
       <footer

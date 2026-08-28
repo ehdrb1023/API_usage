@@ -29,6 +29,8 @@ export type PaidState = "yes" | "no" | "unknown";
 export type Vendor = {
   id: string;
   label: string;
+  /** 파비콘을 받아 오는 출처. `scripts/fetch_vendor_logos.mjs` 가 쓴다. */
+  domain?: string;
   tier: VendorTier;
   paid: PaidState;
   /** "admin-api" 면 실시간 조회가 되고, 아니면 영수증으로만 알 수 있다. */
@@ -72,6 +74,27 @@ function isVendor(v: unknown): v is Vendor {
     typeof o.label === "string" &&
     (o.tier === "primary" || o.tier === "candidate" || o.tier === "grouped")
   );
+}
+
+/**
+ * 키 하나 = 표의 한 줄.
+ *
+ * 벤더로 묶으면 "Supabase 유료" 한 줄로 끝나서 **키가 몇 개인지, 어느 게 위험한지**
+ * 안 보인다. Supabase 만 해도 계정 전체 권한 PAT 이 2개다.
+ */
+export type VendorKeyRow = {
+  vendor: Vendor;
+  key: string;
+};
+
+export function toKeyRows(vendors: Vendor[]): VendorKeyRow[] {
+  const rows: VendorKeyRow[] = [];
+  for (const v of vendors) {
+    // 키를 안 적어 둔 벤더도 한 줄은 나와야 한다 — 없다고 지우면 목록에서 사라진다.
+    if (v.keys.length === 0) rows.push({ vendor: v, key: "" });
+    else for (const key of v.keys) rows.push({ vendor: v, key });
+  }
+  return rows;
 }
 
 /** 실시간으로 비용이 보이는가. 아니면 영수증을 기다려야 한다. */

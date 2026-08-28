@@ -1,0 +1,20 @@
+{
+  "assemblyai": "/vendors/assemblyai.ico",
+  "claude": "/vendors/claude.ico",
+  "clova": "/vendors/clova.ico",
+  "codef": "/vendors/codef.ico",
+  "coolify": "/vendors/coolify.ico",
+  "discord": "/vendors/discord.ico",
+  "google-cloud": "/vendors/google-cloud.ico",
+  "gpt": "/vendors/gpt.png",
+  "kakao": "/vendors/kakao.ico",
+  "kipris": "/vendors/kipris.ico",
+  "kosis": "/vendors/kosis.ico",
+  "neis": "/vendors/neis.ico",
+  "nice": "/vendors/nice.ico",
+  "publicdata": "/vendors/publicdata.ico",
+  "sightengine": "/vendors/sightengine.ico",
+  "supabase": "/vendors/supabase.ico",
+  "textbee": "/vendors/textbee.ico",
+  "vercel": "/vendors/vercel.ico"
+}
