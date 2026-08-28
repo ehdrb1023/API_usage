@@ -108,7 +108,8 @@ export function parseMail(mail: RawMail, config: BillingConfig): ParseResult {
   }
 
   const vendor = rule.vendor ?? parsed.vendor ?? "(미상)";
-  const kind = rule.kind ?? classifyKind(parsed.lineItem, parsed.subjectHint);
+  // 규칙이 못 박아 둔 게 1순위, 본문이 알려 주는 게 2순위, 품목 추정이 3순위.
+  const kind = rule.kind ?? parsed.kindHint ?? classifyKind(parsed.lineItem, parsed.subjectHint);
 
   return {
     ok: true,
@@ -157,13 +158,16 @@ export function classifyKind(lineItem: string | null, subject?: string): ChargeK
    *    구독을 먼저 보면 요금제로 잘못 잡힌다. 선불이 먼저다.
    *
    * 실측 품목 (2026-08-27):
+   *    "Auto-recharge credits"                $15  자동 충전
    *    "One-time credit purchase"            $500  API 크레딧 선불 구매
    *    "Prepaid extra usage, Individual plan" $200  선불 추가 사용분
    *    "Prepayment"                            $5   Deep Infra
    *    "API credit top-up"                    $10   OpenAI 충전
    */
   if (
-    /prepay|prepaid|top-?up|funded|credit balance|credit purchase|재충전|충전/.test(text)
+    /prepay|prepaid|top-?up|funded|credit balance|credit purchase|recharge|재충전|충전/.test(
+      text,
+    )
   ) {
     return "prepaid_topup";
   }
@@ -189,6 +193,8 @@ type Extracted = {
   cardLast4: string | null;
   paymentMethod: string | null;
   subjectHint?: string;
+  /** 본문 자체가 종류를 알려 줄 때 (환불 메일 등). 품목 판정보다 우선한다. */
+  kindHint?: ChargeKind;
 };
 
 const TEMPLATES: Record<TemplateId, (mail: RawMail) => Extracted | null> = {
@@ -213,12 +219,27 @@ const TEMPLATES: Record<TemplateId, (mail: RawMail) => Extracted | null> = {
 function parseStripeReceipt(mail: RawMail): Extracted | null {
   const body = normalize(mail.plaintextBody);
 
-  const head = /Receipt from (.+?) \$([\d,]+\.\d{2}) Paid ([A-Z][a-z]+ \d{1,2}, \d{4})/.exec(body);
+  /**
+   * ⚠️ **머리글이 두 가지다** (2026-08-27 실측).
+   *
+   *   "Receipt from Anthropic, PBC $200.00 Paid August 16, 2026"
+   *   "Refund from Anthropic, PBC $1.50 Refunded on June 19, 2026"
+   *
+   * 환불은 `Paid` 가 아니라 `Refunded on` 이고 동사도 다르다. 결제만 보면
+   * 환불 메일이 통째로 "못 읽음" 으로 빠져 그 달 지출이 실제보다 많아 보인다.
+   */
+  const head =
+    /(Receipt|Refund) from (.+?) \$([\d,]+\.\d{2}) (?:Paid|Refunded on) ([A-Z][a-z]+ \d{1,2}, \d{4})/.exec(
+      body,
+    );
   if (!head) return null;
+
+  const isRefund = head[1] === "Refund";
 
   const receiptNumber = pick(body, /Receipt number ([A-Za-z0-9-]+)/);
   const invoiceNumber = pick(body, /Invoice number ([A-Za-z0-9-]+)/);
-  const paymentMethod = pick(body, /Payment method (.+?)(?: Receipt #|$)/);
+  // 환불 메일은 "Payment method" 대신 "Refunded to" 로 온다.
+  const paymentMethod = pick(body, /(?:Payment method|Refunded to) (.+?)(?: Receipt #|$)/);
 
   // 품목 줄: "Receipt #<번호> [기간] <품목> Qty <n> $<금액>"
   //   기간은 구독에만 있다 (Deep Infra 선불에는 없다).
@@ -227,10 +248,15 @@ function parseStripeReceipt(mail: RawMail): Extracted | null {
   const lineItem = itemLine ? stripPeriod(itemLine).trim() || null : null;
 
   return {
-    vendor: head[1].trim(),
-    paidOn: toIsoDate(head[3]),
-    amount: Number(head[2].replace(/,/g, "")),
+    vendor: head[2].trim(),
+    paidOn: toIsoDate(head[4]),
+    // 머리글 금액이 실제로 오간 돈이다. 아래 품목 줄에는 VAT 전 금액이 따로 있다
+    // (실측: 환불 $1.50 은 "VAT - South Korea (10%)" 분이고 품목은 $15.00 이다).
+    amount: Number(head[3].replace(/,/g, "")),
     currency: "USD",
+    // 환불은 품목이 "Auto-recharge credits" 처럼 원래 결제 품목 그대로라
+    // 품목만 보면 충전으로 잘못 잡힌다. 머리글이 이긴다.
+    kindHint: isRefund ? "credit_note" : undefined,
     receiptNumber,
     invoiceNumber,
     lineItem,

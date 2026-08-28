@@ -48,7 +48,9 @@ export function pocketOf(lineItem: string | null): Pocket {
 
   // 구독 초과분이 먼저다 (위 주석 참고).
   if (/extra usage|\bplan\b|seat|구독/.test(t)) return "plan";
-  if (/credit purchase|credit top-?up|api credit|prepayment|credit balance|충전/.test(t)) {
+  if (
+    /credit purchase|credit top-?up|api credit|prepayment|credit balance|recharge|충전/.test(t)
+  ) {
     return "api";
   }
   return "unknown";

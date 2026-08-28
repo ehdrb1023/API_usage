@@ -45,6 +45,8 @@ describe("주머니 판정 — 합치면 안 되는 두 곳", () => {
   it("나머지 실측 품목", () => {
     assert.equal(pocketOf("API credit top-up"), "api");
     assert.equal(pocketOf("Prepayment"), "api");
+    // ⚠️ classifyKind 에만 넣고 여기 빠뜨려서 "미상" 으로 샜던 적이 있다.
+    assert.equal(pocketOf("Auto-recharge credits"), "api");
   });
 
   it("못 가르면 unknown — 넘겨짚지 않는다", () => {

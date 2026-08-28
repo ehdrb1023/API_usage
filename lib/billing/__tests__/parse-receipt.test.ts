@@ -285,3 +285,60 @@ describe("종류 판정", () => {
     assert.equal(classifyKind(null), "unknown");
   });
 });
+
+/** 2026-06-19 Anthropic 환불 — **머리글·결제수단 표기가 결제와 다르다.** */
+const ANTHROPIC_REFUND = `Anthropic, PBC (https://www.anthropic.com/)
+
+Anthropic, PBC
+
+Refund from Anthropic, PBC $1.50 Refunded on June 19, 2026 (invoice illustration [x]) Download invoice (https://pay.stripe.com/invoice/z/pdf?s=em) Receipt number 3961-6903 Invoice number UMKIHK84-0001 Refunded to Link
+
+Receipt #3961-6903 Auto-recharge credits Qty 1 $15.00 Subtotal $15.00 Total excluding tax $15.00 VAT - South Korea (10%) $1.50 Total $16.50 Amount paid $16.50 (UMKIHK84-0001-CN-01) Credit — Other -$1.50 Credited total -$1.50 Adjusted invoice total $15.00
+
+Powered by stripe logo (https://stripe.com)`;
+
+describe("환불 메일 — 결제와 템플릿이 다르다", () => {
+  const r = must(
+    parseMail(
+      mail({
+        plaintextBody: ANTHROPIC_REFUND,
+        subject: "Your refund from Anthropic, PBC #3961-6903",
+        attachments: ["Invoice-UMKIHK84-0001.pdf", "Refund-3961-6903.pdf"],
+      }),
+      CONFIG,
+    ),
+  );
+
+  it('**"Refund from … Refunded on" 을 읽는다** (결제만 보면 통째로 누락된다)', () => {
+    // 못 읽으면 환불이 빠져 그 달 지출이 실제보다 많아 보인다.
+    assert.equal(r.paidOn, "2026-06-19");
+    assert.equal(r.receiptNumber, "3961-6903");
+  });
+
+  it("환불로 분류하고 **금액을 음수로** 만든다", () => {
+    assert.equal(r.kind, "credit_note");
+    assert.equal(r.amount, -1.5);
+  });
+
+  it("**품목이 충전이어도 환불이 이긴다**", () => {
+    // 품목은 "Auto-recharge credits" 라 품목만 보면 선불 충전으로 잡힌다.
+    assert.equal(r.lineItem, "Auto-recharge credits");
+    assert.notEqual(r.kind, "prepaid_topup");
+  });
+
+  it('"Refunded to" 에서 결제수단을 읽는다 ("Payment method" 가 아니다)', () => {
+    assert.equal(r.paymentMethod, "Link");
+  });
+
+  it("**머리글 금액을 쓴다 — 품목 줄의 VAT 전 금액이 아니다**", () => {
+    // 본문에 $15.00(품목) · $16.50(VAT 포함) · $1.50(환불) 이 다 있다.
+    // 실제로 오간 돈은 머리글의 $1.50 이다.
+    assert.equal(Math.abs(r.amount), 1.5);
+  });
+});
+
+describe("자동 충전 품목", () => {
+  it('"Auto-recharge credits" 는 선불 충전이다', () => {
+    assert.equal(classifyKind("Auto-recharge credits"), "prepaid_topup");
+  });
+});
