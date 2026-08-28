@@ -1,0 +1,104 @@
+{
+  "_readme": [
+    "우리가 쓰는 API 벤더 목록. 화면 배치와 '어디서 새는지' 판단의 기준이 된다.",
+    "",
+    "tier  = primary : 키가 여럿이고 벤더가 키·모델별 사용량 API를 준다 → 독립 탭(상세)",
+    "        grouped : 키 하나거나 쪼갤 게 없다 → '그 외 API' 한 덩어리(월 단위)",
+    "",
+    "paid  = yes / no / unknown.  ⚠️ 누수를 찾는 축이다. no 는 아무리 많이 써도 안 샌다.",
+    "        unknown 은 '확인 안 함'이지 '무료'가 아니다.",
+    "",
+    "billing = 결제가 어떻게 잡히나. 'receipt'면 영수증 메일로만 알 수 있다.",
+    "",
+    "출처: 2026-08-28 사용자 목록 + scripts/scan_key_inventory.mjs 스캔 대조."
+  ],
+
+  "vendors": [
+    {
+      "id": "claude",
+      "label": "Claude",
+      "tier": "primary",
+      "paid": "yes",
+      "usageApi": "admin-api",
+      "billing": "receipt+api",
+      "keys": ["ieum", "discord", "lawsync", "devcowork", "crm", "legalmask-1", "speciai.team", "speciai.studio", "speciai.agent", "brief", "martketing", "yulam-test", "Gccity_API_key", "sebut-test", "agent-test", "my-cronjob"],
+      "note": "콘솔 키 22개·모델 8종. 사용량·비용 모두 Admin API로 실시간 조회 중."
+    },
+    {
+      "id": "gpt",
+      "label": "GPT",
+      "tier": "primary",
+      "paid": "yes",
+      "usageApi": "admin-api",
+      "billing": "receipt+api",
+      "keys": ["speciaikr", "marketing", "speciai-bot", "teamai", "linktalk", "leejuhwan", "specimask.test1"],
+      "note": "콘솔 키 7개(프로젝트 2)·모델 9종. 2026-08-27 실키 검증 완료."
+    },
+    {
+      "id": "gemini",
+      "label": "Gemini",
+      "tier": "candidate",
+      "paid": "yes",
+      "usageApi": "cloud-billing",
+      "billing": "receipt",
+      "keys": ["GEMINI_API_KEY"],
+      "note": "⚠️ 6개 프로젝트에 걸려 있어 키가 여럿일 수 있다. Google Cloud 결제 메일에 금액이 있다(₩46,437 등). 키 개수를 확인해 primary 로 올릴지 결정할 것."
+    },
+
+    { "id": "supabase", "label": "Supabase", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["sbp_v09523…", "sbp_a33865…", "SUPABASE_SERVICE_ROLE_KEY", "NEXT_PUBLIC_SUPABASE_ANON_KEY"],
+      "note": "⚠️ sbp_ 는 **Personal Access Token** — 계정 전체 권한이다. 서로 다른 PAT 이 최소 2개 확인됨. 회수·회전 필요." },
+
+    { "id": "vercel", "label": "Vercel", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["VERCEL_API_TOKEN", "vercel verification code"],
+      "note": "Pro 요금제. 팀 2개(kimlawtech / ehdrb1024)로 갈려 있었고 2026-08-27 에 합침." },
+
+    { "id": "toss", "label": "Toss Payments", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["TOSS_SECRET_KEY", "TOSS_API_CLIENT_KEY", "NEXT_PUBLIC_TOSS_CLIENT_KEY", "TOSS_WEBHOOK_SECRET"],
+      "note": "결제 대행. 우리가 내는 돈이 아니라 **받는 쪽**일 수 있다 — 확인 필요." },
+
+    { "id": "solapi", "label": "Solapi (문자·알림톡)", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["SOLAPI_API_KEY", "SOLAPI_API_SECRET"], "note": "8곳에 걸림. 건당 과금이라 새기 쉽다." },
+
+    { "id": "resend", "label": "Resend (메일)", "tier": "grouped", "paid": "unknown", "usageApi": "none", "billing": "receipt",
+      "keys": ["RESEND_API_KEY"], "note": "11곳 — 가장 널리 쓰임. 무료 한도 초과 시 과금." },
+
+    { "id": "upstash", "label": "Upstash (Redis·Vector)", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["UPSTASH_REDIS_REST_TOKEN", "UPSTASH_VECTOR_REST_TOKEN"], "note": "요청당 과금." },
+
+    { "id": "google-cloud", "label": "Google Cloud", "tier": "grouped", "paid": "yes", "usageApi": "cloud-billing", "billing": "receipt",
+      "keys": ["GOOGLE_VISION_KEY", "youtube api key", "GOOGLE_CLIENT_SECRET", "OAuth 클라이언트 ID", "GOOGLE_SA_PRIVATE_KEY"],
+      "note": "Vision·YouTube·OAuth·서비스계정이 한 청구서로 묶인다. 결제 계정이 2개(01213E…, 01B693…) 확인됨." },
+
+    { "id": "codef", "label": "CODEF", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["CODEF_CLIENT_SECRET", "CODEF_PUBLIC_KEY"], "note": "스크래핑 대행. 건당 과금." },
+
+    { "id": "nice", "label": "NICE 본인인증", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["NICE_CLIENT_SECRET", "NICE_PROXY_TOKEN"], "note": "건당 과금." },
+
+    { "id": "kakao", "label": "Kakao", "tier": "grouped", "paid": "unknown", "usageApi": "none", "billing": "receipt",
+      "keys": ["KAKAO_REST_API_KEY", "KAKAO_BIZ_REST_KEY", "NEXT_PUBLIC_KAKAO_JS_KEY"], "note": "알림톡은 유료, 로그인은 무료." },
+
+    { "id": "sightengine", "label": "Sightengine", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["SIGHTENGINE_API_SECRET"], "note": "이미지 검열. 건당 과금." },
+
+    { "id": "assemblyai", "label": "AssemblyAI", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["ASSEMBLY_API_KEY"], "note": "음성 인식. 분당 과금." },
+
+    { "id": "clova", "label": "NAVER CLOVA Speech", "tier": "grouped", "paid": "yes", "usageApi": "none", "billing": "receipt",
+      "keys": ["CLOVA_SPEECH_PAID_SECRET_KEY", "CLOVA_SPEECH_FREE_SECRET_KEY", "NCP_API_KEY"], "note": "변수명에 free/paid 가 갈려 있다." },
+
+    { "id": "textbee", "label": "TextBee", "tier": "grouped", "paid": "unknown", "usageApi": "none", "billing": "receipt", "keys": ["TEXTBEE_API_KEY"] },
+    { "id": "pexels", "label": "Pexels", "tier": "grouped", "paid": "no", "usageApi": "none", "billing": "none", "keys": ["pexels api key"], "note": "무료. 한도만 있음." },
+    { "id": "coolify", "label": "Coolify", "tier": "grouped", "paid": "unknown", "usageApi": "none", "billing": "receipt", "keys": ["coolify token"], "note": "셀프호스팅이면 서버비만." },
+    { "id": "npmjs", "label": "npmjs.com", "tier": "grouped", "paid": "no", "usageApi": "none", "billing": "none",
+      "keys": ["public-cli2", "specai1"], "note": "퍼블리시 토큰 2개. 무료지만 **유출 시 패키지 탈취** 위험." },
+    { "id": "discord", "label": "Discord", "tier": "grouped", "paid": "no", "usageApi": "none", "billing": "none",
+      "keys": ["DISCORD_TOKEN", "edu bot token", "DISCORD_*_WEBHOOK_URL"], "note": "봇·웹훅 무료." },
+
+    { "id": "neis", "label": "나이스 교육정보", "tier": "grouped", "paid": "no", "usageApi": "none", "billing": "none", "keys": ["나이스 교육정보 api"], "note": "공공 무료." },
+    { "id": "kosis", "label": "KOSIS 통계", "tier": "grouped", "paid": "no", "usageApi": "none", "billing": "none", "keys": ["KOSIS_KEY"], "note": "공공 무료." },
+    { "id": "kipris", "label": "KIPRIS 특허", "tier": "grouped", "paid": "no", "usageApi": "none", "billing": "none", "keys": ["키프리스 rest access key"], "note": "공공 무료." },
+    { "id": "publicdata", "label": "공공데이터포털", "tier": "grouped", "paid": "no", "usageApi": "none", "billing": "none", "keys": ["PUBLICDATA_API_KEY", "LAW_API_OC", "DART_API_KEY", "NTS_API_KEY", "NABO_API_KEY", "BIZINFO_API_KEY"], "note": "전부 공공 무료." }
+  ]
+}
