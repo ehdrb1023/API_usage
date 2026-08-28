@@ -28,12 +28,27 @@ import { pathToFileURL } from "node:url";
 // TS 모듈을 그대로 쓰기 위해 프로젝트의 테스트용 로더를 재사용한다.
 // (`node --import ./lib/clients/__tests__/ts-resolve.mjs` 로 실행된다)
 const ROOT = process.cwd();
+
+/** `.env` 를 읽는다. 벤더 API 조회에 키가 필요하다. */
+const env = (() => {
+  try {
+    const out = {};
+    for (const line of readFileSync(path.join(ROOT, ".env"), "utf8").split("\n")) {
+      const m = /^([A-Z_0-9]+)=(.*)$/.exec(line.trim());
+      if (m) out[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+    }
+    return { ...out, ...process.env };
+  } catch {
+    return process.env;
+  }
+})();
 const imp = (rel) => import(pathToFileURL(path.join(ROOT, rel)).href);
 
 const { parseMail } = await imp("lib/billing/parse-receipt.ts");
 const { loadBillingConfig, activeMailboxes, gmailQuery } = await imp("lib/billing/sources.ts");
 const { mergeReceipts, mergeUnparsed, loadReceipts, loadCards, monthlySummary, byCard } =
   await imp("lib/billing/store.ts");
+const { topupWindows, prepaidBalance, daysRemaining } = await imp("lib/billing/balance.ts");
 
 const arg = process.argv[2];
 const config = await loadBillingConfig();
@@ -139,6 +154,99 @@ for (const r of rows) {
 }
 
 console.log(`\n⚠️ 선불 충전은 API 후불과 더하지 마세요 — 나간 시점과 쓰는 시점이 다릅니다.`);
+
+// ---------------------------------------------------------------- 선불 잔액
+
+/**
+ * 벤더 API 로 "충전 시작일 이후 실제 API 지출" 을 조회한다.
+ *
+ * ⚠️ 조회할 수 없는 벤더는 **키를 넣지 않는다.** 0 을 넣으면 "안 썼다" 가 되어
+ *    잔액이 실제보다 많아 보인다.
+ */
+async function spentSince(vendor, since) {
+  const now = new Date().toISOString();
+  try {
+    if (vendor === "Anthropic") {
+      if (!env.ANTHROPIC_ADMIN_KEY) return null;
+      let total = 0, page;
+      for (let i = 0; i < 20; i++) {
+        const u = new URL("/v1/organizations/cost_report", "https://api.anthropic.com");
+        u.searchParams.set("starting_at", `${since}T00:00:00Z`);
+        u.searchParams.set("ending_at", now);
+        u.searchParams.set("bucket_width", "1d");
+        u.searchParams.set("limit", "31");
+        if (page) u.searchParams.set("page", page);
+        const r = await fetch(u, {
+          headers: {
+            "x-api-key": env.ANTHROPIC_ADMIN_KEY,
+            "anthropic-version": env.ANTHROPIC_API_VERSION ?? "2023-06-01",
+          },
+        });
+        if (!r.ok) return null;
+        const b = await r.json();
+        for (const bucket of b.data ?? [])
+          for (const item of bucket.results ?? [])
+            // ⚠️ Anthropic 은 **센트 문자열**이다. 100 으로 안 나누면 100배가 된다.
+            total += Number(item.amount ?? 0) / 100;
+        if (!b.has_more) break;
+        page = b.last_page ?? b.next_page;
+      }
+      return total;
+    }
+
+    if (vendor === "OpenAI") {
+      if (!env.OPENAI_ADMIN_KEY) return null;
+      const u = new URL("/v1/organization/costs", "https://api.openai.com");
+      u.searchParams.set("start_time", String(Math.floor(Date.parse(`${since}T00:00:00Z`) / 1000)));
+      u.searchParams.set("end_time", String(Math.floor(Date.now() / 1000)));
+      u.searchParams.set("bucket_width", "1d");
+      u.searchParams.set("limit", "180");
+      const r = await fetch(u, {
+        headers: {
+          authorization: `Bearer ${env.OPENAI_ADMIN_KEY}`,
+          ...(env.OPENAI_ORG_ID ? { "openai-organization": env.OPENAI_ORG_ID } : {}),
+        },
+      });
+      if (!r.ok) return null;
+      const b = await r.json();
+      // OpenAI 는 이미 USD 실수다. 나누지 않는다.
+      return (b.data ?? []).flatMap((x) => x.results ?? []).reduce((s, x) => s + (x.amount?.value ?? 0), 0);
+    }
+  } catch {
+    return null; // 조회 실패는 "0" 이 아니라 "모름" 이다.
+  }
+  return null; // 조회 경로가 없는 벤더 (Deep Infra 등)
+}
+
+const windows = topupWindows(receipts);
+if (windows.length) {
+  const spent = {};
+  for (const w of windows) {
+    if (w.pocket !== "api") continue; // 구독 주머니는 애초에 조회 불가
+    const v = await spentSince(w.vendor, w.since);
+    if (v !== null) spent[w.vendor] = v;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  console.log(`\n선불 잔액 (추정)\n`);
+  console.log("  벤더             주머니   넣은돈      쓴돈      남은돈   소진예상");
+  console.log("  " + "─".repeat(66));
+  for (const row of prepaidBalance(windows, spent)) {
+    const days = daysRemaining(row, today);
+    const pocket = row.pocket === "api" ? "API" : row.pocket === "plan" ? "구독" : "미상";
+    const num = (n) => (n === null ? "    ?   " : n.toFixed(2).padStart(8));
+    console.log(
+      `  ${row.vendor.slice(0, 15).padEnd(15)} ${pocket.padEnd(6)} ${num(row.toppedUp)} ` +
+        `${num(row.spent)} ${num(row.balance)}   ` +
+        (days === null ? "—" : `약 ${days}일`),
+    );
+  }
+  console.log(`
+  ⚠️ **시작 잔액을 모릅니다.** 메일에서 보이는 첫 충전 이전에 남아 있던 돈은
+     알 수 없으므로, 실제 잔액은 위 값 **이상**입니다.
+  ⚠️ "구독" 주머니(Claude Code·claude.ai 초과 사용분)는 Admin API 에 안 잡혀
+     소진을 볼 방법이 없습니다. \`?\` 는 0 이 아니라 **모른다**는 뜻입니다.`);
+}
 
 console.log(`\n카드별\n`);
 for (const c of byCard(receipts, cards)) {
