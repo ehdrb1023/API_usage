@@ -26,9 +26,17 @@ import type { RangeId, ServiceId, ServiceSeries } from "@/lib/types";
 type Props = {
   series: ServiceSeries[];
   mode: "mock" | "api";
+  /**
+   * 탭 아래에 붙일 내용. "그 외 API" 목록이 여기로 들어온다.
+   *
+   * 왜 props 로 받나: 그 목록은 `config/vendors.json` 을 fs 로 읽는 **서버 컴포넌트**라
+   * "use client" 인 이 파일 안에서 직접 import 할 수 없다. 슬롯만 열어 두고
+   * `app/page.tsx` 가 끼워 넣는다.
+   */
+  children?: React.ReactNode;
 };
 
-export default function Dashboard({ series, mode }: Props) {
+export default function Dashboard({ series, mode, children }: Props) {
   const [service, setService] = useState<ServiceId>("claude");
   const [range, setRange] = useState<RangeId>("30d");
   /** 서비스별 표에서 선택한 API 키. null 이면 전체 합계를 본다. */
@@ -226,6 +234,9 @@ export default function Dashboard({ series, mode }: Props) {
       <div className="mt-6">
         <DailyTable series={active} points={view.points} deltas={view.deltas} />
       </div>
+
+      {/* Claude·GPT 는 위 탭에서 상세히 본다. 나머지는 한 덩어리로 아래에. */}
+      {children}
 
       {/* 일 경계 경고는 상단 배너로 옮겼다. 여기엔 탭별 상세만 남긴다. */}
       <footer

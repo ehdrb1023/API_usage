@@ -1,5 +1,7 @@
 import Dashboard from "@/components/Dashboard";
+import VendorList from "@/components/VendorList";
 import { getAllSeries, getDataSourceMode } from "@/lib/data-source";
+import { loadVendors } from "@/lib/vendors";
 
 /**
  * 페이지 자체는 매 요청 새로 그린다 — config/client-keys.json 수정이 바로 보여야 하고,
@@ -10,6 +12,8 @@ export const dynamic = "force-dynamic";
 
 export default async function Page() {
   const mode = getDataSourceMode();
+  // 실패해도 빈 배열이라 대시보드를 막지 않는다 (lib/vendors.ts 주석 참고).
+  const vendors = await loadVendors();
 
   let series;
   try {
@@ -36,5 +40,14 @@ export default async function Page() {
     );
   }
 
-  return <Dashboard series={series} mode={mode} />;
+  return (
+    <Dashboard series={series} mode={mode}>
+      {/*
+        ⚠️ 금액은 아직 안 넘긴다. 영수증 수집이 `data/billing/` 에 쌓이면
+        그때 벤더별 합계를 `spendByVendor` 로 넘기면 된다.
+        지금은 "무엇이 있고, 유료인지, 비용이 보이는지" 까지만 보여준다.
+      */}
+      <VendorList vendors={vendors} />
+    </Dashboard>
+  );
 }
