@@ -9,14 +9,8 @@
  * 새 벤더는 `lib/services.ts` 에 정의 하나를 추가하는 것으로 끝난다.
  */
 
-/**
- * 벤더는 `lib/services.ts` 에 등록한다. 화면 탭 순서도 거기 배열 순서를 따른다.
- *
- * `"cc"` 만 성격이 다르다 — 벤더 Admin API 가 아니라 **이 컴퓨터의 Claude Code
- * 세션 로그**(`~/.claude/projects`)를 읽는다. 그래서 레지스트리에 없고
- * 미니 위젯(실시간) 경로에만 나타난다. 배경은 `lib/local/live.ts` 주석 참고.
- */
-export type ServiceId = "claude" | "gpt" | "cc";
+/** 등록은 `lib/services.ts`. 화면 탭 순서도 거기 배열 순서를 따른다. */
+export type ServiceId = "claude" | "gpt";
 
 export type RangeId = "7d" | "30d" | "mtd";
 

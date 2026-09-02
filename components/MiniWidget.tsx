@@ -41,37 +41,9 @@ import type { ServiceId } from "@/lib/types";
  */
 const FALLBACK_REFRESH_MS = 60_000;
 
-/**
- * 로컬 세션 로그(`cc`)만 따로 받아 오는 주기의 기본값. 서버가 `localRefreshSeconds`
- * 로 알려 주면 그 값을 따른다. 벤더보다 훨씬 짧은 이유는 쿼터가 없기 때문이다 —
- * 자세한 배경은 app/api/live/route.ts 주석 참고.
- */
-const FALLBACK_LOCAL_REFRESH_MS = 10_000;
-
-/**
- * 방금 받은 로컬 서비스만 갈아 끼운다. 벤더 줄은 손대지 않는다 —
- * 이 응답에는 벤더가 아예 담겨 있지 않으므로 통째로 바꾸면 벤더 줄이 사라진다.
- *
- * 시계(kstTime)는 이쪽으로도 갱신한다. 로컬 폴링이 더 잦으니 머리말이 그만큼
- * 자주 움직이고, "화면이 살아 있다" 는 신호가 된다.
- */
-function mergeLocal(prev: LiveSnapshot, fresh: LiveSnapshot): LiveSnapshot {
-  return {
-    ...prev,
-    updatedAt: fresh.updatedAt,
-    kstDate: fresh.kstDate,
-    kstTime: fresh.kstTime,
-    services: [
-      ...prev.services.filter((s) => s.id !== "cc"),
-      ...fresh.services.filter((s) => s.id === "cc"),
-    ],
-  };
-}
-
 const SERVICE_COLOR: Record<ServiceId, string> = {
   claude: "var(--series-2)",
   gpt: "var(--series-1)",
-  cc: "var(--series-3)",
 };
 
 export default function MiniWidget() {
@@ -117,36 +89,6 @@ export default function MiniWidget() {
       window.removeEventListener("focus", refresh);
     };
   }, [load, refreshMs]);
-
-  /**
-   * 로컬 세션만 자주 다시 읽는다. **띄우기로 고른 줄에 로컬이 있을 때만** 돈다 —
-   * 벤더 줄만 걸어 뒀다면 이 폴링은 아무것도 바꾸지 않으므로 낭비다.
-   *
-   * `loading` 을 건드리지 않는 것도 의도적이다. 10초마다 깜빡이면 눈에 거슬리고,
-   * 실제로 기다리는 시간도 아니다 (로컬 파일 증분 읽기).
-   */
-  const wantsLocal = useMemo(() => lines.some((l) => l.service === "cc"), [lines]);
-
-  const loadLocal = useCallback(async () => {
-    try {
-      const res = await fetch("/api/live?scope=local", { cache: "no-store" });
-      const body = await res.json();
-      if (!res.ok) return;
-      const fresh = body as LiveSnapshot;
-      setSnapshot((prev) => (prev ? mergeLocal(prev, fresh) : fresh));
-    } catch {
-      // 다음 주기에 다시 시도한다. 전체 폴링이 살아 있으므로 에러 문구까지 띄우지 않는다.
-    }
-  }, []);
-
-  const localMs =
-    (snapshot?.localRefreshSeconds ?? 0) * 1000 || FALLBACK_LOCAL_REFRESH_MS;
-
-  useEffect(() => {
-    if (!wantsLocal) return;
-    const timer = setInterval(() => void loadLocal(), localMs);
-    return () => clearInterval(timer);
-  }, [wantsLocal, loadLocal, localMs]);
 
   // 갱신이 막힌 서비스가 하나라도 있으면 머리말에 알린다. 값은 그대로 뜨는데
   // 그게 방금 값인지 20분 전 값인지 모르면 판단을 그르친다.

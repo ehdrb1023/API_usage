@@ -32,12 +32,6 @@ export type LiveEntry = {
   /** 라벨 옆 배지. 예: "비활성" */
   badge?: string;
   /**
-   * 마우스를 올렸을 때 뜨는 전체 식별자. 라벨이 잘려 있을 때 원본을 보여준다 —
-   * 디렉토리 전체 경로, 세션 UUID 처럼 라벨에 다 담을 수 없는 값이 여기 온다.
-   * 없으면 선택창이 `id` 를 대신 띄운다.
-   */
-  title?: string;
-  /**
    * 오늘 사용량이 없어서 전부 0 인 항목. 선택창에는 나와야 하지만
    * (지금은 안 쓰는 키도 감시 대상이 될 수 있다) 목록 아래쪽으로 내린다.
    */
@@ -85,12 +79,6 @@ export type LiveSnapshot = {
   source: "mock" | "api";
   /** 클라이언트가 몇 초마다 다시 물어봐야 하는지. 서버 캐시 구간과 같은 값이다. */
   refreshSeconds: number;
-  /**
-   * 로컬 세션 로그(`cc`)만 다시 읽는 주기. **벤더보다 훨씬 짧다** — 쿼터가 없어서
-   * 자주 읽어도 공짜이고, "지금 이 세션이 얼마 쓰고 있나" 는 1분 지연이면 늦다.
-   * 미니 창은 이 주기로 `/api/live?scope=local` 을 따로 두드린다.
-   */
-  localRefreshSeconds?: number;
   services: LiveService[];
 };
 
@@ -135,14 +123,4 @@ export const DEFAULT_LINES: LiveLine[] = [
   // GPT 키를 안 넣었으면 그 서비스가 스냅샷에 아예 없다. 줄은 "—" 로 뜨고,
   // 선택창에서 지우면 된다. 기본값에 넣어 두는 편이 "붙이면 바로 보인다".
   { service: "gpt", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "GPT 전체" },
-  /**
-   * 지금 쓰고 있는 Claude Code 세션. **세션 id 가 아니라 "활성" 이라는 자리**를
-   * 가리키므로 한 번 걸어 두면 계속 지금 세션을 따라간다 (`lib/local/live.ts`).
-   */
-  {
-    service: "cc",
-    entryId: "session:active",
-    metricKey: COST_METRIC_KEY,
-    fallbackLabel: "지금 세션",
-  },
 ];
