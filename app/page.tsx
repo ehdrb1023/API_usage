@@ -1,6 +1,9 @@
 import Dashboard from "@/components/Dashboard";
 import VendorList from "@/components/VendorList";
+import { loadReceipts } from "@/lib/billing/store";
+import { buildVendorSpend, loadVendorCosts } from "@/lib/billing/vendor-spend";
 import { getAllSeries, getDataSourceMode } from "@/lib/data-source";
+import { kstDay } from "@/lib/kst";
 import { loadVendors } from "@/lib/vendors";
 
 /**
@@ -16,6 +19,17 @@ export default async function Page() {
   const vendors = await loadVendors();
   // 탭에 띄울 개수 — Claude·GPT 는 자기 탭이 있으므로 뺀다.
   const vendorCount = vendors.filter((v) => v.tier !== "primary").length;
+
+  /**
+   * "그 외 API" 의 이번 달 지출. 영수증(실제 청구액) + 수기 장부를 합친다.
+   * 셋 다 실패해도 빈 값으로 떨어지므로 대시보드를 막지 않는다.
+   */
+  const month = kstDay(new Date()).slice(0, 7);
+  const [receipts, manualMonths] = await Promise.all([
+    loadReceipts().catch(() => []),
+    loadVendorCosts(),
+  ]);
+  const spend = buildVendorSpend(receipts, vendors, manualMonths, month);
 
   let series;
   try {
@@ -44,12 +58,7 @@ export default async function Page() {
 
   return (
     <Dashboard series={series} mode={mode} vendorCount={vendorCount}>
-      {/*
-        ⚠️ 금액은 아직 안 넘긴다. 영수증 수집이 `data/billing/` 에 쌓이면
-        그때 벤더별 합계를 `spendByVendor` 로 넘기면 된다.
-        지금은 "무엇이 있고, 유료인지, 비용이 보이는지" 까지만 보여준다.
-      */}
-      <VendorList vendors={vendors} />
+      <VendorList vendors={vendors} spend={spend} />
     </Dashboard>
   );
 }

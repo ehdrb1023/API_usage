@@ -17,12 +17,24 @@
  */
 
 import LOGOS from "@/config/vendor-logos.json";
+import { totalSpend, type VendorSpend } from "@/lib/billing/vendor-spend";
 import { toKeyRows, type Vendor } from "@/lib/vendors";
 
 type Props = {
   vendors: Vendor[];
-  /** 벤더 id → 이번 달 실제 지출(USD). 영수증에서 온다. 없으면 "모름". */
-  spendByVendor?: Record<string, number>;
+  /**
+   * 이번 달 지출. 영수증(실제 청구액)과 수기 장부를 합친 것이다
+   * (`lib/billing/vendor-spend.ts`). 없으면 표의 금액 열이 전부 "모름" 이 된다.
+   */
+  spend?: VendorSpend;
+};
+
+const EMPTY_SPEND: VendorSpend = {
+  month: "",
+  byVendorId: {},
+  manualIds: [],
+  overridden: [],
+  unregistered: [],
 };
 
 const PAID_LABEL = { yes: "유료", no: "무료", unknown: "미확인" } as const;
@@ -34,7 +46,9 @@ const PAID_COLOR = {
 
 const logoOf = (id: string): string | undefined => (LOGOS as Record<string, string>)[id];
 
-export default function VendorList({ vendors, spendByVendor = {} }: Props) {
+export default function VendorList({ vendors, spend = EMPTY_SPEND }: Props) {
+  const spendByVendor = spend.byVendorId;
+  const manual = new Set(spend.manualIds);
   const others = vendors.filter((v) => v.tier !== "primary");
   if (others.length === 0) return null;
 
@@ -93,7 +107,7 @@ export default function VendorList({ vendors, spendByVendor = {} }: Props) {
           </thead>
           <tbody>
             {rows.map(({ vendor: v, key }, i) => {
-              const spend = spendByVendor[v.id];
+              const amount = spendByVendor[v.id];
               // 같은 벤더가 이어지면 벤더 칸을 비워 눈이 덜 어지럽다.
               const firstOfVendor = i === 0 || rows[i - 1].vendor.id !== v.id;
               const logo = logoOf(v.id);
@@ -156,8 +170,25 @@ export default function VendorList({ vendors, spendByVendor = {} }: Props) {
                   </td>
 
                   <td className="px-3.5 py-2 text-right tabular-nums">
-                    {!firstOfVendor ? null : spend !== undefined ? (
-                      `$${spend.toFixed(2)}`
+                    {!firstOfVendor ? null : amount !== undefined ? (
+                      <span
+                        title={
+                          manual.has(v.id)
+                            ? "config/vendor-costs.json 에 손으로 적은 값입니다"
+                            : "결제 메일에서 파싱된 실제 청구액입니다"
+                        }
+                      >
+                        ${amount.toFixed(2)}
+                        {manual.has(v.id) && (
+                          // 실제 청구액과 사람이 적은 값을 눈으로 구분할 수 있어야 한다.
+                          <em
+                            className="ml-1 text-[10px] not-italic"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            수기
+                          </em>
+                        )}
+                      </span>
                     ) : v.paid === "no" ? (
                       <span style={{ color: "var(--text-muted)" }}>—</span>
                     ) : (
@@ -181,10 +212,49 @@ export default function VendorList({ vendors, spendByVendor = {} }: Props) {
         </table>
       </div>
 
+      {(Object.keys(spendByVendor).length > 0 || spend.unregistered.length > 0) && (
+        <p className="mt-2 flex flex-wrap items-baseline justify-between gap-x-4 text-sm">
+          <span style={{ color: "var(--text-secondary)" }}>
+            이번 달 합계{spend.month && ` (${spend.month})`}
+          </span>
+          <strong className="tabular-nums">${totalSpend(spend).toFixed(2)}</strong>
+        </p>
+      )}
+
+      {spend.unregistered.length > 0 && (
+        /*
+          영수증에는 있는데 목록에 없는 벤더. **이 표가 찾으려던 게 정확히 이것이다** —
+          아무도 등록하지 않은 채 돈만 나가고 있는 곳이라, 눈에 띄게 띄운다.
+        */
+        <p
+          role="note"
+          className="mt-2 rounded-lg border px-3.5 py-2.5 text-xs"
+          style={{
+            borderColor: "var(--status-critical)",
+            background: "color-mix(in srgb, var(--status-critical) 8%, transparent)",
+            color: "var(--text-secondary)",
+          }}
+        >
+          <strong style={{ color: "var(--text-primary)" }}>목록에 없는 벤더</strong>
+          에서 결제가 나갔습니다 —{" "}
+          {spend.unregistered.map((u) => `${u.name} $${u.amount.toFixed(2)}`).join(", ")}.{" "}
+          <code>config/vendors.json</code> 에 추가하세요.
+        </p>
+      )}
+
+      {spend.overridden.length > 0 && (
+        <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
+          {spend.overridden.join(", ")} 는 영수증이 들어와 수기 값을 쓰지 않았습니다.
+          <code>config/vendor-costs.json</code> 에서 지워도 됩니다.
+        </p>
+      )}
+
       <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
         목록은 <code>config/vendors.json</code> 에서 옵니다. 새 API 를 쓰기 시작하면 거기
         한 줄을 추가하고 <code>node scripts/fetch_vendor_logos.mjs</code> 로 로고를 받으세요.{" "}
         <strong>&ldquo;미확인&rdquo;은 무료라는 뜻이 아닙니다</strong> — 유료인지 확인을 안 한 것입니다.
+        사용량 API 도 결제 메일도 없는 벤더는 <code>config/vendor-costs.json</code> 에
+        월 금액을 직접 적으면 이 표에 잡힙니다.
       </p>
     </section>
   );
