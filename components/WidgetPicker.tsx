@@ -41,6 +41,7 @@ type Props = {
 const SERVICE_COLOR: Record<ServiceId, string> = {
   claude: "var(--series-2)",
   gpt: "var(--series-1)",
+  cc: "var(--series-3)",
 };
 
 export default function WidgetPicker({ snapshot: given, onClose }: Props) {
@@ -115,7 +116,7 @@ export default function WidgetPicker({ snapshot: given, onClose }: Props) {
           className="wp-search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="모델·API 키 이름으로 찾기"
+          placeholder="모델·API 키·세션·경로로 찾기"
           aria-label="항목 검색"
         />
         <label className="wp-toggle">
@@ -237,7 +238,7 @@ function ServiceSection({
                 <ul className="wp-rows">
                   {rows.map((entry) => (
                     <li key={entry.id} className="wp-row">
-                      <span className="wp-name" title={entry.id}>
+                      <span className="wp-name" title={entry.title ?? entry.id}>
                         {entry.label}
                         {entry.hint && <em className="wp-hint"> {entry.hint}</em>}
                         {entry.badge && <em className="wp-badge">{entry.badge}</em>}

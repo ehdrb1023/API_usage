@@ -1,4 +1,4 @@
-import { getLiveSnapshot } from "@/lib/live";
+import { getLiveSnapshot, type LiveScope } from "@/lib/live";
 
 /**
  * GET /api/live — 미니 위젯이 1분마다 폴링하는 "오늘"(KST) 스냅샷.
@@ -9,9 +9,19 @@ import { getLiveSnapshot } from "@/lib/live";
  */
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+/**
+ * `?scope=local` 이면 **로컬 세션 로그만** 담아 돌려준다 (벤더를 안 부른다).
+ *
+ * 미니 창은 이 경로를 훨씬 자주 두드린다. "지금 이 세션이 얼마 쓰고 있나" 는 1분
+ * 지연이면 늦은데, 벤더까지 딸려 오면 Admin API 시간당 90회를 그만큼 태우기 때문이다.
+ * 로컬 파일 읽기는 쿼터가 없고 증분이라(`lib/local/scan.ts`) 비용이 거의 0 이다.
+ */
+export async function GET(request: Request) {
+  const scope: LiveScope =
+    new URL(request.url).searchParams.get("scope") === "local" ? "local" : "all";
+
   try {
-    return Response.json(await getLiveSnapshot(), {
+    return Response.json(await getLiveSnapshot(new Date(), scope), {
       headers: { "cache-control": "no-store" },
     });
   } catch (error) {

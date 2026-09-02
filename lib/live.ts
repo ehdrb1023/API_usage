@@ -32,6 +32,11 @@ import {
   type LiveService,
   type LiveSnapshot,
 } from "@/lib/live-types";
+import {
+  buildLocalLiveService,
+  hasLocalService,
+  localRefreshSeconds,
+} from "@/lib/local/live";
 import { enabledServices, type ServiceDefinition } from "@/lib/services";
 import type { BreakdownItem, DailyPoint, MetricSpec } from "@/lib/types";
 
@@ -43,11 +48,27 @@ const COST_SPEC: LiveMetricSpec = {
   estimated: true,
 };
 
-export async function getLiveSnapshot(now: Date = new Date()): Promise<LiveSnapshot> {
+/**
+ * 무엇까지 담을지. `"local"` 은 **벤더를 아예 건드리지 않는다.**
+ *
+ * 미니 위젯이 로컬 세션만 자주 갱신할 때 쓴다 — 로컬 로그는 쿼터가 없어서 몇 초마다
+ * 읽어도 공짜인데, 같은 요청에 벤더 조회가 딸려 오면 Admin API 시간당 90회를 태운다.
+ */
+export type LiveScope = "all" | "local";
+
+export async function getLiveSnapshot(
+  now: Date = new Date(),
+  scope: LiveScope = "all",
+): Promise<LiveSnapshot> {
   const mode = getDataSourceMode();
-  const services = await Promise.all(
-    enabledServices(mode).map((service) => guard(service, now)),
-  );
+
+  const [vendors, local] = await Promise.all([
+    scope === "local"
+      ? Promise.resolve([])
+      : Promise.all(enabledServices(mode).map((service) => guard(service, now))),
+    // 로그가 없으면(배포 환경) 이 서비스는 아예 안 뜬다.
+    hasLocalService() ? guardLocal(now).then((s) => [s]) : Promise.resolve([]),
+  ]);
 
   return {
     updatedAt: now.toISOString(),
@@ -56,8 +77,34 @@ export async function getLiveSnapshot(now: Date = new Date()): Promise<LiveSnaps
     source: mode,
     // 폴링 주기를 클라이언트가 정하면 서버 캐시 구간과 어긋난다. 서버가 정해 준다.
     refreshSeconds: liveRefreshSeconds(),
-    services,
+    localRefreshSeconds: localRefreshSeconds(),
+    services: [...vendors, ...local],
   };
+}
+
+/**
+ * 로컬 로그 읽기가 실패해도 벤더 줄은 계속 보여야 한다 (`guard` 와 같은 원칙).
+ * 권한 문제·깨진 파일 하나로 미니 창 전체가 죽으면 안 된다.
+ */
+async function guardLocal(now: Date): Promise<LiveService> {
+  try {
+    return await buildLocalLiveService(now);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("[live] 로컬 세션 로그 읽기 실패", message);
+    return {
+      id: "cc",
+      label: "Claude Code",
+      date: "",
+      boundary: "KST",
+      boundaryNote: "",
+      freshness: "",
+      primaryMetric: COST_METRIC_KEY,
+      metricSpecs: [COST_SPEC],
+      groups: [],
+      error: message,
+    };
+  }
 }
 
 /** 한 서비스가 죽어도 나머지 줄은 계속 보여야 한다 (getAllSeries 와 같은 원칙). */
