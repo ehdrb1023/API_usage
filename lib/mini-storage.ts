@@ -13,6 +13,7 @@
  *    `subscribe`/`read` 는 `useSyncExternalStore` 를 통해서만 부를 것.
  */
 
+import { isLiveRange, type LiveRange } from "@/lib/live-range";
 import { DEFAULT_LINES, type LiveLine } from "@/lib/live-types";
 
 const STORAGE_KEY = "api-usage-mini-lines-v1";
@@ -64,4 +65,53 @@ export function parseLines(raw: string | null): LiveLine[] {
   } catch {
     return DEFAULT_LINES; // 저장값이 깨졌으면 조용히 기본값으로 간다.
   }
+}
+
+// ---------------------------------------------------------------- 조회 구간
+
+/**
+ * 고른 구간(오늘·7일·이번 달)도 같은 방식으로 둔다.
+ *
+ * 줄 목록과 **같은 저장소를 쓰되 키는 따로다.** 구간은 창마다 다른 게 자연스럽지만
+ * (미니 창은 오늘, 대시보드는 이번 달) 창을 닫았다 열면 남아 있어야 한다 —
+ * 미니 창은 띄워 두고 쓰는 물건이라 매번 다시 고르게 하면 성가시다.
+ */
+const RANGE_KEY = "api-usage-mini-range-v1";
+const RANGE_EVENT = "api-usage-mini-range-changed";
+
+let rangeMemory: LiveRange | null = null;
+
+export function subscribeRange(onChange: () => void): () => void {
+  window.addEventListener(RANGE_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(RANGE_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/** getSnapshot. 유니온 문자열이라 값 비교가 그대로 먹는다. */
+export function readRange(): LiveRange {
+  try {
+    const raw = localStorage.getItem(RANGE_KEY);
+    if (isLiveRange(raw)) return raw;
+  } catch {
+    /* 막힌 환경 — 아래 거울로 떨어진다. */
+  }
+  return rangeMemory ?? "today";
+}
+
+/** 서버에는 저장값이 없다 → 기본 구간으로 그려야 hydration 이 어긋나지 않는다. */
+export function readRangeOnServer(): LiveRange {
+  return "today";
+}
+
+export function writeRange(range: LiveRange): void {
+  rangeMemory = range;
+  try {
+    localStorage.setItem(RANGE_KEY, range);
+  } catch {
+    /* 저장은 못 해도 이번 세션은 rangeMemory 로 굴러간다. */
+  }
+  window.dispatchEvent(new Event(RANGE_EVENT));
 }

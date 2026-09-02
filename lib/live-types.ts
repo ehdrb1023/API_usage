@@ -9,6 +9,7 @@
  * 같은 규칙 하나로 표현된다.
  */
 
+import type { LiveRange } from "@/lib/live-range";
 import type { MetricFormat, ServiceId } from "@/lib/types";
 
 /** 비용은 지표 목록에 항상 첫 줄로 끼워 넣는다. `metrics` 안의 예약 키. */
@@ -71,6 +72,29 @@ export type LiveService = {
   error?: string;
 };
 
+/**
+ * 구독 한도 한 칸. **금액이 아니라 퍼센트다** — 벤더가 상한을 공개하지 않아서
+ * "몇 토큰 남음" 은 만들 수 없다 (lib/quota.ts 주석 참고).
+ */
+export type QuotaWindow = {
+  /** "session" | "weekly_all" | "weekly_scoped" — 벤더가 주는 값 그대로 */
+  key: string;
+  label: string;
+  usedPercent: number;
+  remainingPercent: number;
+  /** 이 시각에 0 으로 돌아간다 (ISO). 모르면 null */
+  resetsAt: string | null;
+  severity: string;
+};
+
+export type QuotaSnapshot = {
+  windows: QuotaWindow[];
+  /** false 면 한도를 넘겨도 과금이 아니라 **중단**이다. 화면 문구가 갈린다. */
+  extraUsageEnabled: boolean;
+  /** 조회 실패 사유. 있으면 windows 는 비어 있다. */
+  error?: string;
+};
+
 export type LiveSnapshot = {
   /** 스냅샷을 만든 시각 (ISO) */
   updatedAt: string;
@@ -79,7 +103,14 @@ export type LiveSnapshot = {
   source: "mock" | "api";
   /** 클라이언트가 몇 초마다 다시 물어봐야 하는지. 서버 캐시 구간과 같은 값이다. */
   refreshSeconds: number;
+  /** 이 스냅샷이 담고 있는 구간. 클라이언트가 고른 값을 서버가 되돌려 준다. */
+  range: LiveRange;
   services: LiveService[];
+  /**
+   * 구독 한도 잔량. 자격증명이 있는 환경(= 로컬)에서만 채워진다 — 배포본에서는
+   * undefined 이고, 그때 미니 창은 이 줄을 통째로 그리지 않는다.
+   */
+  quota?: QuotaSnapshot;
 };
 
 /** 화면에 띄울 한 줄. localStorage 에 이 모양 그대로 저장한다. */

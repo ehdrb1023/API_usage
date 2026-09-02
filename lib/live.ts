@@ -1,5 +1,8 @@
 /**
- * 미니 위젯(/mini)이 1분마다 받아 가는 "오늘" 스냅샷.
+ * 미니 위젯(/mini)이 1분마다 받아 가는 스냅샷 — 오늘 / 7일 / 이번 달.
+ *
+ * 구간을 바꿔도 **벤더 호출은 늘지 않는다.** 지난 날짜는 하루 캐시를 더해 쓴다
+ * (`lib/live-range.ts`). Admin API 가 시간당 90회뿐이라 이게 설계 제약이다.
  *
  * ── 모든 서비스의 "오늘" 이 같다 ──────────────────────────────────────────
  * **KST 오늘** (00:00 KST = 15:00 UTC). AI 벤더는 사용량을 1시간 버킷으로 주므로
@@ -31,7 +34,10 @@ import {
   type LiveMetricSpec,
   type LiveService,
   type LiveSnapshot,
+  type QuotaSnapshot,
 } from "@/lib/live-types";
+import { rangeNote, sumRange, type LiveRange } from "@/lib/live-range";
+import { getQuota, hasQuotaSource } from "@/lib/quota";
 import { enabledServices, type ServiceDefinition } from "@/lib/services";
 import type { BreakdownItem, DailyPoint, MetricSpec } from "@/lib/types";
 
@@ -43,11 +49,17 @@ const COST_SPEC: LiveMetricSpec = {
   estimated: true,
 };
 
-export async function getLiveSnapshot(now: Date = new Date()): Promise<LiveSnapshot> {
+export async function getLiveSnapshot(
+  now: Date = new Date(),
+  range: LiveRange = "today",
+): Promise<LiveSnapshot> {
   const mode = getDataSourceMode();
-  const services = await Promise.all(
-    enabledServices(mode).map((service) => guard(service, now)),
-  );
+  const [services, quota] = await Promise.all([
+    Promise.all(enabledServices(mode).map((service) => guard(service, now, range))),
+    // 한도는 벤더 사용량과 **출처가 다르다**(구독 vs 종량제). 한쪽이 죽어도
+    // 다른 쪽은 나와야 하므로 나란히 부르고, getQuota 는 던지지 않는다.
+    quotaOrNothing(now),
+  ]);
 
   return {
     updatedAt: now.toISOString(),
@@ -56,17 +68,31 @@ export async function getLiveSnapshot(now: Date = new Date()): Promise<LiveSnaps
     source: mode,
     // 폴링 주기를 클라이언트가 정하면 서버 캐시 구간과 어긋난다. 서버가 정해 준다.
     refreshSeconds: liveRefreshSeconds(),
+    range,
     services,
+    quota,
   };
+}
+
+/**
+ * 자격증명이 없는 환경(배포본)에서는 **아예 undefined 다.**
+ *
+ * 빈 배열이나 error 를 담아 보내면 미니 창에 "한도 조회 실패" 가 상시로 뜬다.
+ * 배포본에서 그건 고장이 아니라 **원래 안 되는 것**이라, 줄 자체가 없어야 맞다.
+ */
+async function quotaOrNothing(now: Date): Promise<QuotaSnapshot | undefined> {
+  if (!(await hasQuotaSource())) return undefined;
+  return getQuota(now);
 }
 
 /** 한 서비스가 죽어도 나머지 줄은 계속 보여야 한다 (getAllSeries 와 같은 원칙). */
 async function guard(
   service: ServiceDefinition,
   now: Date,
+  range: LiveRange,
 ): Promise<LiveService> {
   try {
-    return await buildLiveService(service, now);
+    return await buildLiveService(service, now, range);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[live] ${service.id} 조회 실패`, message);
@@ -95,6 +121,7 @@ async function guard(
 async function buildLiveService(
   service: ServiceDefinition,
   now: Date,
+  range: LiveRange,
 ): Promise<LiveService> {
   const window = kstTodayWindow(now);
   const mode = getDataSourceMode();
@@ -113,7 +140,7 @@ async function buildLiveService(
       : await getTodayUsage(service.id, window.from, window.to);
 
   const build = { ...service.build, keys, clientKeyNames };
-  const point = buildDailyPoints(
+  const todayPoint = buildDailyPoints(
     [buildKstToday(window.date, today.value, rates)],
     build,
   )[0];
@@ -126,12 +153,18 @@ async function buildLiveService(
   const history = buildDailyPoints(days, build);
   const metricKeys = service.metricSpecs.map((m) => m.key);
 
+  /**
+   * 구간 합계. `today` 면 오늘 값 그대로이고, 그 외에는 하루 캐시의 지난 날들을
+   * 더한다 — **벤더를 다시 부르지 않는다** (lib/live-range.ts 주석 참고).
+   */
+  const point = sumRange(history, todayPoint, window.date, range);
+
   return {
     id: service.id,
     label: service.label,
     date: window.date,
     boundary: "KST",
-    boundaryNote: `한국시간 ${window.date} 00:00 부터 지금까지 (매일 자정 리셋)`,
+    boundaryNote: rangeNote(window.date, range),
     freshness: today.stale
       ? `갱신 실패 — ${new Date(today.at).toISOString().slice(11, 16)}Z 값입니다. ` +
         `사유: ${today.reason ?? "알 수 없음"}`
