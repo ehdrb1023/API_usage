@@ -19,7 +19,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { ServiceId } from "@/lib/types";
+import { isServiceId, SERVICE_IDS, type ServiceId } from "@/lib/types";
 
 export const BUDGETS_FILE = path.join("config", "budgets.json");
 
@@ -71,7 +71,9 @@ export function parseBudgets(raw: unknown): Partial<Record<ServiceId, number>> {
 
   const out: Partial<Record<ServiceId, number>> = {};
   for (const [key, value] of Object.entries(monthly as Record<string, unknown>)) {
-    if (key !== "claude" && key !== "gpt") continue;
+    // 알 수 없는 id 는 버린다. 계정을 늘렸는데 여기 목록을 안 고쳐 조용히
+    // 무시되는 일이 없도록 `SERVICE_IDS` 한 곳만 본다.
+    if (!isServiceId(key)) continue;
     if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) continue;
     out[key] = value;
   }
@@ -87,9 +89,7 @@ export function buildBudgets(
   spentByService: Partial<Record<ServiceId, number>>,
   budgets: Partial<Record<ServiceId, number>>,
 ): Budget[] {
-  const services: ServiceId[] = ["claude", "gpt"];
-
-  return services
+  return SERVICE_IDS
     .filter((s) => s in spentByService)
     .map((service) => {
       const spentUsd = spentByService[service] ?? 0;

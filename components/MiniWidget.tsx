@@ -12,6 +12,7 @@ import {
   lineId,
   type LiveLine,
   type LiveSnapshot,
+  SERVICE_COLOR,
 } from "@/lib/live-types";
 import {
   parseLines,
@@ -23,7 +24,6 @@ import {
   subscribeRange,
   writeRange,
 } from "@/lib/mini-storage";
-import type { ServiceId } from "@/lib/types";
 
 /**
  * 항상 켜두는 미니 위젯.
@@ -45,11 +45,6 @@ import type { ServiceId } from "@/lib/types";
  * 이 기본값을 쓴다.
  */
 const FALLBACK_REFRESH_MS = 60_000;
-
-const SERVICE_COLOR: Record<ServiceId, string> = {
-  claude: "var(--series-2)",
-  gpt: "var(--series-1)",
-};
 
 export default function MiniWidget() {
   const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null);

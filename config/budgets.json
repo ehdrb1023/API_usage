@@ -10,7 +10,8 @@
     "  비워 두면 막대를 그리지 않고 '기준 없음' 으로 표시한다.",
     "  임의의 상한을 지어내면 '여유 있다' 로 읽히므로 그렇게 하지 않는다.",
     "",
-    "키는 서비스 id 다 — claude / gpt (lib/types.ts 의 ServiceId).",
+    "키는 서비스 id 다 — claude / claude-2 / claude-3 / gpt (lib/types.ts 의 ServiceId).",
+    "Claude 는 계정(조직)마다 id 가 따로다. 이름은 config/accounts.json 에서 바꾼다.",
     "값은 숫자만. null 이면 미설정으로 본다.",
     "",
     "예시:",
@@ -18,6 +19,8 @@
   ],
   "monthlyUsd": {
     "claude": null,
+    "claude-2": null,
+    "claude-3": null,
     "gpt": null
   }
 }

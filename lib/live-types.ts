@@ -155,3 +155,17 @@ export const DEFAULT_LINES: LiveLine[] = [
   // 선택창에서 지우면 된다. 기본값에 넣어 두는 편이 "붙이면 바로 보인다".
   { service: "gpt", entryId: "total", metricKey: COST_METRIC_KEY, fallbackLabel: "GPT 전체" },
 ];
+
+/**
+ * 서비스별 색. **두 위젯이 같은 값을 써야** 미니 창과 고르기 창에서 같은 계정이
+ * 같은 색으로 보인다. 예전엔 두 컴포넌트에 복붙돼 있어 계정을 늘릴 때마다
+ * 두 곳을 고쳐야 했다.
+ *
+ * Claude 계정끼리는 서로 다른 색이어야 한다 — 같은 색이면 탭을 옮겨도 구분이 안 된다.
+ */
+export const SERVICE_COLOR: Record<ServiceId, string> = {
+  claude: "var(--series-2)",
+  "claude-2": "var(--series-6)",
+  "claude-3": "var(--series-8)",
+  gpt: "var(--series-1)",
+};

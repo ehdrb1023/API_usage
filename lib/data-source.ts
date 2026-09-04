@@ -14,6 +14,7 @@ import {
   type ServiceDefinition,
   type VendorDays,
 } from "@/lib/services";
+import { loadAccountLabels } from "@/lib/accounts";
 import type { DayBoundary, ServiceId, ServiceSeries } from "@/lib/types";
 import { createStaleFallback, type Fresh } from "@/lib/vendor-fallback";
 
@@ -58,14 +59,16 @@ export async function getServiceSeries(id: ServiceId): Promise<ServiceSeries> {
   const service = getService(id);
   const mode = getDataSourceMode();
 
-  const [days, clientKeyNames] = await Promise.all([
+  const [days, clientKeyNames, accountLabels] = await Promise.all([
     mode === "mock" ? readMockDays(service) : (await getVendorDays(id)).value,
     loadClientKeyNames(),
+    // 계정 표시 이름은 config 에서 온다 — 코드 수정 없이 바꿀 수 있어야 한다.
+    loadAccountLabels(),
   ]);
 
   return {
     service: service.id,
-    label: service.label,
+    label: accountLabels[service.id] ?? service.label,
     breakdownLabel: service.breakdownLabel,
     dayBoundary: KST_BOUNDARY,
     primaryMetric: service.primaryMetric,

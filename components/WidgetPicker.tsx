@@ -10,6 +10,7 @@ import {
   type LiveLine,
   type LiveService,
   type LiveSnapshot,
+  SERVICE_COLOR,
 } from "@/lib/live-types";
 import {
   parseLines,
@@ -36,11 +37,6 @@ type Props = {
   /** 이미 받아 둔 스냅샷이 있으면 넘긴다 (미니 창). 없으면 직접 받아온다 (대시보드). */
   snapshot?: LiveSnapshot | null;
   onClose: () => void;
-};
-
-const SERVICE_COLOR: Record<ServiceId, string> = {
-  claude: "var(--series-2)",
-  gpt: "var(--series-1)",
 };
 
 export default function WidgetPicker({ snapshot: given, onClose }: Props) {

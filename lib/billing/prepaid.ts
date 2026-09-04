@@ -19,6 +19,7 @@
 
 import { unstable_cache } from "next/cache";
 
+import { CLAUDE_ACCOUNTS, requireAdminKey } from "@/lib/accounts";
 import { toCostDays as anthropicCostDays } from "@/lib/adapters/anthropic";
 import { toCostDays as openaiCostDays } from "@/lib/adapters/openai";
 import { fetchAllAnthropicCostBuckets } from "@/lib/clients/anthropic";
@@ -162,14 +163,22 @@ async function fetchSpend(
   to: string,
 ): Promise<number | null> {
   try {
-    if (service === "claude") {
-      const buckets = await fetchAllAnthropicCostBuckets({
-        starting_at: from,
-        ending_at: to,
-        bucket_width: "1d",
-        limit: 31,
-        group_by: ["description", "workspace_id"],
-      });
+    /**
+     * Claude 계정은 셋이고 각각 키가 다르다. **폴백하지 않는다** —
+     * 다른 계정 키로 조회하면 남의 조직 소진액이 이 잔액에서 빠진다.
+     */
+    const account = CLAUDE_ACCOUNTS.find((a) => a.id === service);
+    if (account) {
+      const buckets = await fetchAllAnthropicCostBuckets(
+        {
+          starting_at: from,
+          ending_at: to,
+          bucket_width: "1d",
+          limit: 31,
+          group_by: ["description", "workspace_id"],
+        },
+        { adminKey: requireAdminKey(account.envVar) },
+      );
       return sumCost(anthropicCostDays(buckets));
     }
 

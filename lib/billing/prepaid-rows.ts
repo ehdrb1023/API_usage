@@ -25,6 +25,11 @@ import type { Receipt } from "./types";
  *
  * **여기 없는 벤더는 소진을 셀 수 없다.** 억지로 0 을 넣지 말 것 — `balance.ts`
  * 주석대로 "안 썼다" 가 되어 잔액이 부풀려진다.
+ *
+ * ⚠️ **영수증에는 계정 정보가 없다.** 결제 메일은 "Anthropic" 이라고만 하고 어느
+ *    조직인지 말해 주지 않는다. 그래서 첫 계정(`claude`)으로 본다. Claude 계정을
+ *    여럿 쓰면서 둘 이상에 선불을 충전하면 이 잔액은 첫 계정 기준이 되므로,
+ *    그때는 영수증에 계정을 실을 방법부터 만들어야 한다 (지금은 방법이 없다).
  */
 export const VENDOR_SERVICE: Record<string, ServiceId> = {
   Anthropic: "claude",

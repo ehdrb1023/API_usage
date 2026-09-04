@@ -9,8 +9,28 @@
  * 새 벤더는 `lib/services.ts` 에 정의 하나를 추가하는 것으로 끝난다.
  */
 
-/** 등록은 `lib/services.ts`. 화면 탭 순서도 거기 배열 순서를 따른다. */
-export type ServiceId = "claude" | "gpt";
+/**
+ * 등록은 `lib/services.ts`. 화면 탭 순서도 거기 배열 순서를 따른다.
+ *
+ * ── Claude 가 셋인 이유 ────────────────────────────────────────────────────
+ * **벤더가 아니라 계정 단위다.** Anthropic Admin 키는 조직 하나만 볼 수 있어서,
+ * 조직이 셋이면 키도 셋이고 탭도 셋이어야 한다. 한 탭에 합치면 "어느 계정에서
+ * 새는지" 가 사라진다 — 이 대시보드가 답하려는 질문이 그거라 합치지 않는다.
+ *
+ * 계정별 키 환경변수와 표시 이름은 `lib/accounts.ts` 가 들고 있다.
+ */
+export type ServiceId = "claude" | "claude-2" | "claude-3" | "gpt";
+
+/**
+ * 알려진 서비스 id 전부. **런타임 검증용**이다 (설정 파일의 오타 거르기 등).
+ * `ServiceId` 를 늘리면 여기도 늘려야 하고, 안 늘리면 타입 검사에서 걸린다.
+ */
+export const SERVICE_IDS = ["claude", "claude-2", "claude-3", "gpt"] as const satisfies
+  readonly ServiceId[];
+
+export function isServiceId(value: unknown): value is ServiceId {
+  return typeof value === "string" && (SERVICE_IDS as readonly string[]).includes(value);
+}
 
 export type RangeId = "7d" | "30d" | "mtd";
 

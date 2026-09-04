@@ -53,6 +53,12 @@ import {
   hasOpenAiCredentials,
   toUnixSeconds,
 } from "@/lib/clients/openai";
+import {
+  CLAUDE_ACCOUNTS,
+  hasAdminKey,
+  requireAdminKey,
+  type ClaudeAccount,
+} from "@/lib/accounts";
 import { buildKstDays, type KstDaysResult } from "@/lib/kst-days";
 import { kstMonthWindow } from "@/lib/kst";
 import type { MetricSpec, ServiceId } from "@/lib/types";
@@ -92,11 +98,22 @@ export type ServiceDefinition = {
 
 // ============================================================================
 // Claude (Anthropic) — 실키 검증 완료 (2026-08-25)
+//
+// **계정(= 조직)마다 하나씩 만든다.** Admin 키는 발급한 조직 하나만 보므로
+// 정의를 공유하되 키만 갈아 끼운다 (`lib/accounts.ts`).
 // ============================================================================
 
-const ANTHROPIC: ServiceDefinition = {
-  id: "claude",
-  label: "Claude",
+function makeAnthropic(account: ClaudeAccount): ServiceDefinition {
+  /**
+   * ⚠️ **키를 폴백시키지 않는다.** `resolveAnthropicConfig` 은 adminKey 가 비면
+   *    `process.env.ANTHROPIC_ADMIN_KEY` 로 떨어지는데, 그러면 2번 탭에 1번 계정
+   *    숫자가 그대로 뜬다. `requireAdminKey` 가 그 지점을 끊는다.
+   */
+  const auth = () => ({ adminKey: requireAdminKey(account.envVar) });
+
+  return {
+  id: account.id,
+  label: account.defaultLabel,
   breakdownLabel: "모델",
   altBreakdown: {
     label: "서비스",
@@ -114,8 +131,9 @@ const ANTHROPIC: ServiceDefinition = {
   build: ANTHROPIC_BUILD,
   mockFile: "anthropic-usage.json",
   mockToDays: (raw) => anthropicDayRows(raw as AnthropicRaw),
-  // Anthropic 은 이 대시보드의 기본 서비스라 키가 없으면 에러 화면이 뜨는 편이 맞다.
-  isConfigured: () => true,
+  // 키가 없는 계정은 실 API 모드에서 탭 자체가 안 뜬다 — 빈 탭이 떠 있으면
+  // "아직 안 붙인 계정" 과 "조회 실패" 가 구분되지 않는다.
+  isConfigured: () => hasAdminKey(account.envVar),
 
   /**
    * ⚠️ 사용량을 **1일이 아니라 1시간** 버킷으로 받는다. KST 자정(= UTC 15:00)이
@@ -126,26 +144,32 @@ const ANTHROPIC: ServiceDefinition = {
     const { from, to } = kstMonthWindow();
 
     const [hourly, cost, keys] = await Promise.all([
-      fetchAllAnthropicUsageBuckets({
-        starting_at: from,
-        ending_at: to,
-        bucket_width: "1h",
-        // 1h 는 페이지당 최대 168버킷(=7일). 구간이 두 달이라 8페이지쯤 된다.
-        limit: 168,
-        // 키별(서비스별) 집계를 하려면 api_key_id 가 반드시 있어야 한다.
-        group_by: ["model", "api_key_id"],
-      }),
+      fetchAllAnthropicUsageBuckets(
+        {
+          starting_at: from,
+          ending_at: to,
+          bucket_width: "1h",
+          // 1h 는 페이지당 최대 168버킷(=7일). 구간이 두 달이라 8페이지쯤 된다.
+          limit: 168,
+          // 키별(서비스별) 집계를 하려면 api_key_id 가 반드시 있어야 한다.
+          group_by: ["model", "api_key_id"],
+        },
+        auth(),
+      ),
       // ⚠️ cost_report 는 **1d 뿐이고** group_by 도 description / workspace_id 만 된다.
       //    api_key_id 를 넣으면 400 이 난다 (2026-08-14 실측). 그래서 이 값은 화면에
       //    직접 나가지 않고 **단가 역산에만** 쓴다.
-      fetchAllAnthropicCostBuckets({
-        starting_at: from,
-        ending_at: to,
-        bucket_width: "1d",
-        limit: 31,
-        group_by: ["description", "workspace_id"],
-      }),
-      anthropicKeyNames(),
+      fetchAllAnthropicCostBuckets(
+        {
+          starting_at: from,
+          ending_at: to,
+          bucket_width: "1d",
+          limit: 31,
+          group_by: ["description", "workspace_id"],
+        },
+        auth(),
+      ),
+      anthropicKeyNames(auth()),
     ]);
 
     return {
@@ -158,13 +182,16 @@ const ANTHROPIC: ServiceDefinition = {
   },
 
   fetchTodayUsage: async (from, to) => {
-    const buckets = await fetchAllAnthropicUsageBuckets({
-      starting_at: from,
-      ending_at: to,
-      bucket_width: "1h",
-      limit: 24,
-      group_by: ["model", "api_key_id"],
-    });
+    const buckets = await fetchAllAnthropicUsageBuckets(
+      {
+        starting_at: from,
+        ending_at: to,
+        bucket_width: "1h",
+        limit: 24,
+        group_by: ["model", "api_key_id"],
+      },
+      auth(),
+    );
     return buckets.flatMap((b) => anthropicUsageRows(b.results));
   },
 
@@ -173,7 +200,8 @@ const ANTHROPIC: ServiceDefinition = {
     "비용은 cost_report 가 UTC 하루 단위로만 나와서 한국시간으로 자를 수 없기 때문에, " +
     "최근 구간의 (비용 ÷ 토큰) 으로 역산한 단가를 곱한 추정치입니다 " +
     "(하루씩 빼고 맞히는 검증에서 오차 ±0.1%). 청구서와 소수점까지 같지는 않습니다.",
-};
+  };
+}
 
 /**
  * 키 id → 이름 매핑. 이름 조회는 **부가 정보**라, 실패해도 대시보드 전체를 죽이지 않고
@@ -182,9 +210,9 @@ const ANTHROPIC: ServiceDefinition = {
  * status 필터를 걸지 않는다 — 과거 사용량에는 지금 archived 인 키도 등장하고,
  * 필터를 걸면 그 몫이 통째로 "미등록" 이 된다.
  */
-async function anthropicKeyNames(): Promise<KeyMeta[]> {
+async function anthropicKeyNames(options: { adminKey: string }): Promise<KeyMeta[]> {
   try {
-    return await fetchAllAnthropicApiKeys();
+    return await fetchAllAnthropicApiKeys({}, options);
   } catch (error) {
     console.warn(
       "[services] Anthropic List API Keys 실패 — 키 이름 없이 id 로 표시합니다.",
@@ -350,7 +378,11 @@ async function openaiKeyNames(): Promise<KeyMeta[]> {
 // ============================================================================
 
 /** 등록 순서가 곧 탭 순서다. */
-export const SERVICES: ServiceDefinition[] = [ANTHROPIC, OPENAI];
+/** 탭 순서 = 이 배열 순서. Claude 계정이 먼저, 그다음 GPT. */
+export const SERVICES: ServiceDefinition[] = [
+  ...CLAUDE_ACCOUNTS.map(makeAnthropic),
+  OPENAI,
+];
 
 const BY_ID = new Map<ServiceId, ServiceDefinition>(SERVICES.map((s) => [s.id, s]));
 
