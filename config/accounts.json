@@ -19,8 +19,8 @@
     "적지 않으면 'Claude 1' 같은 기본 이름이 나옵니다."
   ],
   "labels": {
-    "claude": "Claude 1",
-    "claude-2": "Claude 2",
-    "claude-3": "Claude 3"
+    "claude": "Claude (speciai)",
+    "claude-2": "Claude (aidomain)",
+    "claude-3": "Claude (kimlawtech)"
   }
 }
