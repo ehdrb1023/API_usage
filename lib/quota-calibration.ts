@@ -62,6 +62,14 @@ export type Snapshot = {
   /** UTC ISO. */
   at: string;
   account: AccountStamp;
+  /**
+   * 찍은 컴퓨터 이름.
+   *
+   * 계정과 별개다 — 한 계정을 여러 PC 에서 쓸 수 있고, 그때 **퍼센트는 계정 전체인데
+   * 토큰은 그 PC 것뿐**이라 둘을 짝지으면 1%당 토큰이 실제보다 작게 나온다.
+   * 기록해 두지 않으면 나중에 파일을 합쳤을 때 어느 PC 것인지 알 방법이 없다.
+   */
+  machine: string;
   windows: CalibWindow[];
   /**
    * 이 스냅샷의 `tokens` 가 **어느 시각 이후**를 센 것인가.
@@ -145,6 +153,11 @@ export async function readAccount(): Promise<AccountStamp> {
 
 function str(v: unknown): string | null {
   return typeof v === "string" && v ? v : null;
+}
+
+/** 이 컴퓨터 이름. 바꾸고 싶으면 `QUOTA_MACHINE` 로 덮는다. */
+export function machineName(): string {
+  return process.env.QUOTA_MACHINE || os.hostname();
 }
 
 // ---------------------------------------------------------------- 저장소
@@ -236,6 +249,7 @@ export async function takeSnapshot(now: Date = new Date()): Promise<Snapshot> {
   const snapshot: Snapshot = {
     at: now.toISOString(),
     account,
+    machine: machineName(),
     windows: quota.windows.map((w) => ({
       key: w.key,
       label: w.label,
@@ -309,7 +323,10 @@ export function segments(snapshots: Snapshot[]): Segment[] {
         tokens: current.tokens,
       };
 
-      const reject = rejectReason(before, window);
+      const reject =
+        previous.machine && current.machine && previous.machine !== current.machine
+          ? "다른 PC 에서 찍혔다"
+          : rejectReason(before, window);
       const deltaPercent = before ? window.usedPercent - before.usedPercent : 0;
 
       out.push({

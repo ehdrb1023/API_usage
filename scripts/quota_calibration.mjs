@@ -22,6 +22,7 @@ import {
   readSnapshots,
   sameWindow,
   segments,
+  machineName,
   storePath,
   takeSnapshot,
   totalWithCacheRead,
@@ -44,6 +45,7 @@ async function snap() {
   const s = await takeSnapshot();
 
   console.log(`계정  ${s.account.email ?? s.account.uuid}  ${dim(s.account.tier ?? "")}`);
+  console.log(`PC    ${s.machine}`);
   console.log(`시각  ${s.at}  (KST ${kstDayOf(s.at)})`);
   console.log("");
   for (const w of s.windows) {
@@ -71,6 +73,7 @@ async function report() {
   const snapshots = await readSnapshots(account.uuid);
 
   console.log(`계정  ${account.email ?? account.uuid}  ${dim(account.tier ?? "")}`);
+  console.log(`PC    ${machineName()}`);
   console.log(`스냅샷 ${snapshots.length}장  ${dim(storePath(account.uuid))}\n`);
 
   if (snapshots.length < 2) {

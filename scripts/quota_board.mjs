@@ -18,7 +18,7 @@
 import { buildBoard, rangeStart, total, totalWithoutCache, RANGES } from "../lib/quota-board.ts";
 import { scanLocalUsage } from "../lib/local/scan.ts";
 import { getQuota } from "../lib/quota.ts";
-import { calibrate, readAccount, readSnapshots, segments } from "../lib/quota-calibration.ts";
+import { calibrate, machineName, readAccount, readSnapshots, segments } from "../lib/quota-calibration.ts";
 
 const C = {
   off: "\x1b[0m",
@@ -112,7 +112,7 @@ function header(board, account, since, width) {
   const t = board.totals;
   const who = account ? `${account.email ?? account.uuid}` : "계정 미상";
   const lines = [
-    `${C.orange}구독 사용량${C.off}  ${dim(RANGE)}   ${dim(who)}`,
+    `${C.orange}구독 사용량${C.off}  ${dim(RANGE)}   ${dim(who)}   ${dim(machineName())}`,
     `${C.bold}${fmt(total(t))}${C.off} 토큰(캐시읽기 포함)   ${C.bold}${fmt(totalWithoutCache(t))}${C.off} 제외   ` +
       `${C.bold}${fmt(t.calls)}${C.off} 호출   ${C.bold}${board.sessions}${C.off} 세션   ` +
       `${C.bold}${(board.cacheHitRate * 100).toFixed(1)}%${C.off} 캐시히트`,

@@ -36,6 +36,7 @@ function snapshot(
   return {
     at,
     account: ACCOUNT,
+    machine: "test-pc",
     windows,
     since: null,
     tokens: null,
@@ -134,6 +135,36 @@ describe("quota-calibration/segments", () => {
     ]);
     assert.equal(segs[0].reject, "퍼센트가 안 움직였다 (구간이 짧다)");
     assert.ok(Number.isFinite(segs[0].perPercentWithCacheRead));
+  });
+
+  it("★ 다른 PC 에서 찍힌 구간은 버린다", () => {
+    // 퍼센트는 계정 전체인데 토큰은 그 PC 것뿐이라 짝지으면 1%당 토큰이 어긋난다.
+    const segs = segments([
+      snapshot("2026-09-07T00:00:00.000Z", [weekly(10, "2026-09-13T09:59:59.000Z")], {
+        machine: "노트북",
+      }),
+      snapshot("2026-09-07T06:00:00.000Z", [weekly(20, "2026-09-13T09:59:59.000Z")], {
+        machine: "데스크톱",
+        since: "2026-09-07T00:00:00.000Z",
+        tokens: tokens({ output: 1000 }),
+      }),
+    ]);
+    assert.equal(segs[0].reject, "다른 PC 에서 찍혔다");
+    assert.equal(segs[0].perPercentWithCacheRead, 0);
+  });
+
+  it("같은 PC 면 정상적으로 구간이 된다", () => {
+    const segs = segments([
+      snapshot("2026-09-07T00:00:00.000Z", [weekly(10, "2026-09-13T09:59:59.000Z")], {
+        machine: "노트북",
+      }),
+      snapshot("2026-09-07T06:00:00.000Z", [weekly(20, "2026-09-13T09:59:59.000Z")], {
+        machine: "노트북",
+        since: "2026-09-07T00:00:00.000Z",
+        tokens: tokens({ output: 1000 }),
+      }),
+    ]);
+    assert.equal(segs[0].reject, null);
   });
 
   it("토큰이 없는 스냅샷(첫 장)은 구간을 만들지 않는다", () => {
