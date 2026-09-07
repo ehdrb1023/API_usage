@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "mini": "bash scripts/mini/open-mini.sh"
+    "mini": "bash scripts/mini/open-mini.sh",
+    "quota:snap": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_calibration.mjs snap",
+    "quota:report": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_calibration.mjs report",
+    "test": "node --import ./lib/clients/__tests__/ts-resolve.mjs --test \"lib/**/__tests__/*.test.ts\""
   },
   "dependencies": {
     "next": "16.3.1",
