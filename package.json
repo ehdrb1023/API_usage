@@ -10,7 +10,8 @@
     "mini": "bash scripts/mini/open-mini.sh",
     "quota:snap": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_calibration.mjs snap",
     "quota:report": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_calibration.mjs report",
-    "test": "node --import ./lib/clients/__tests__/ts-resolve.mjs --test \"lib/**/__tests__/*.test.ts\""
+    "test": "node --import ./lib/clients/__tests__/ts-resolve.mjs --test \"lib/**/__tests__/*.test.ts\"",
+    "quota:board": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_board.mjs"
   },
   "dependencies": {
     "next": "16.3.1",
