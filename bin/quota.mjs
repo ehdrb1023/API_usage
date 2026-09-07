@@ -33,6 +33,7 @@ const TARGETS = {
   board: path.join(root, "scripts", "quota_board.mjs"),
   calibration: path.join(root, "scripts", "quota_calibration.mjs"),
   meter: path.join(root, "scripts", "quota_meter.mjs"),
+  web: path.join(root, "scripts", "quota_web.mjs"),
 };
 
 const args = process.argv.slice(2);
@@ -44,7 +45,9 @@ const target =
     ? TARGETS.calibration
     : first === "meter"
       ? TARGETS.meter
-      : TARGETS.board;
+      : first === "web"
+        ? TARGETS.web
+        : TARGETS.board;
 const forwarded = args;
 
 if (first === "--help" || first === "-h") {
@@ -60,6 +63,8 @@ if (first === "--help" || first === "-h") {
       "  quota meter --line   한 줄만",
       "  quota meter --list   세션 목록",
       "  quota meter <검색어>  그 세션에 고정 (id앞자리·제목일부)",
+      "  quota web            브라우저 계기판 (5초 갱신)",
+      "  quota web --port N   포트 지정",
       "  quota snap           한도 스냅샷 기록",
       "  quota report         보정값 · 남은 양 추정",
       "",
