@@ -32,15 +32,20 @@ const LOADER = path.join(root, "lib", "clients", "__tests__", "ts-resolve.mjs");
 const TARGETS = {
   board: path.join(root, "scripts", "quota_board.mjs"),
   calibration: path.join(root, "scripts", "quota_calibration.mjs"),
+  meter: path.join(root, "scripts", "quota_meter.mjs"),
 };
 
 const args = process.argv.slice(2);
 const first = args[0];
 
-// `snap`·`report` 는 보정 스크립트, 나머지는 전부 보드로 보낸다.
-const isCalibration = first === "snap" || first === "report";
-const target = isCalibration ? TARGETS.calibration : TARGETS.board;
-const forwarded = isCalibration ? args : args;
+// 첫 낱말로 대상을 고른다. 없으면 보드.
+const target =
+  first === "snap" || first === "report"
+    ? TARGETS.calibration
+    : first === "meter"
+      ? TARGETS.meter
+      : TARGETS.board;
+const forwarded = args;
 
 if (first === "--help" || first === "-h") {
   process.stdout.write(
@@ -50,6 +55,9 @@ if (first === "--help" || first === "-h") {
       "  quota                오늘 보드",
       "  quota 7d | 30d       구간 보드",
       "  quota 7d --watch     10초마다 갱신",
+      "  quota meter          계기판 (작은 창용)",
+      "  quota meter --watch  5초마다 갱신",
+      "  quota meter --line   한 줄만",
       "  quota snap           한도 스냅샷 기록",
       "  quota report         보정값 · 남은 양 추정",
       "",
