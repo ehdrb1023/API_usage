@@ -69,7 +69,7 @@ async function draw() {
     readAccount().catch(() => null),
   ]);
 
-  const board = buildBoard(scan.rows, scan.tools);
+  const board = buildBoard(scan.rows, scan.tools, scan.titles, process.env.CLAUDE_CODE_SESSION_ID ?? null);
   const calibrations = account
     ? calibrate(segments(await readSnapshots(account.uuid)))
     : [];
@@ -81,6 +81,7 @@ async function draw() {
   out.push(tabs(width));
   out.push(header(board, account, since, width));
   out.push(quotaPanel(quota, calibrations, width));
+  out.push(panel("Sessions", C.cyan, sessionRows(board, width - 4), width));
 
   const [left, right] = [Math.floor((width - 3) / 2), Math.ceil((width - 3) / 2)];
   out.push(sideBySide(
@@ -177,6 +178,47 @@ function dailyRows(board, width) {
       ], nameWidth),
     ),
   ];
+}
+
+/**
+ * 세션별. 맨 위가 **가장 최근에 응답이 있었던 세션** = 지금 돌고 있는 세션이다.
+ * 그래서 ● 를 붙인다 — "지금 이 세션 얼마 썼나" 가 이 패널을 보는 이유다.
+ */
+function sessionRows(board, width) {
+  if (!board.bySession.length) return [dim("구간 안에 세션 없음")];
+  const max = Math.max(1, ...board.bySession.map(total));
+  // 스파크라인 10 + " ● " 3 + 숫자 8·8·8 + 시각 7 = 44. 나머지가 이름 자리다.
+  const PREFIX = 13;
+  const nameWidth = Math.max(12, width - PREFIX - 31);
+  return [
+    dim(
+      " ".repeat(PREFIX) +
+        padVisible("세션", nameWidth) +
+        ["토큰", "제외", "호출"].map((l) => padStartVisible(l, 8)).join("") +
+        padStartVisible("마지막", 7),
+    ),
+    ...board.bySession.slice(0, 10).map((b) => {
+      // 맨 위 = 가장 최근에 응답이 있었던 세션 = 지금 돌고 있는 것.
+      const mark = b.isCurrent ? `${C.orange}●${C.off}` : " ";
+      return (
+        sparkline(total(b), max, C.cyan) +
+        ` ${mark} ` +
+        padVisible(cut(b.label, nameWidth), nameWidth) +
+        lead(fmt(total(b)), 8, C.yellow) +
+        lead(fmt(totalWithoutCache(b)), 8, null) +
+        lead(String(b.calls), 8, null) +
+        dim(padStartVisible(hhmm(b.lastTs), 7))
+      );
+    }),
+  ];
+}
+
+/** 로컬 시각 HH:MM. 초까지는 필요 없고 폭만 들쭉날쭉해진다. */
+function hhmm(iso) {
+  if (!iso) return "-";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function bucketRows(buckets, width) {

@@ -26,6 +26,23 @@ export type Totals = {
 
 export type Bucket = Totals & { key: string };
 
+/** 세션 버킷. 라벨과 마지막 활동 시각이 더 붙는다. */
+export type SessionBucket = Bucket & {
+  /** Claude Code 가 붙인 세션 제목. 없으면 sessionId 앞자리. */
+  label: string;
+  /** 이 세션의 마지막 응답 시각(UTC ISO). 최근 순 정렬에 쓴다. */
+  lastTs: string;
+  /**
+   * 지금 이 세션인가.
+   *
+   * Claude Code 안에서 실행하면 `CLAUDE_CODE_SESSION_ID` 가 있고, 그 값이 로그
+   * 파일명·`sessionId` 와 그대로 일치한다 (실측 확인). 일반 터미널에서 돌리면
+   * 그 값이 없으므로 **가장 최근에 응답이 있었던 세션**으로 대신한다 — 추정이라
+   * 필드를 나눠 둔다. 둘을 같은 값으로 접으면 어느 쪽인지 못 본다.
+   */
+  isCurrent: boolean;
+};
+
 export type Board = {
   totals: Totals;
   sessions: number;
@@ -35,6 +52,11 @@ export type Board = {
   daily: Bucket[];
   byProject: Bucket[];
   byModel: Bucket[];
+  /**
+   * 세션별. **최근 활동 순**이다 — 쓴 양 순이 아니다.
+   * "지금 이 세션 얼마 썼나" 가 이 축을 보는 이유이고, 그러려면 맨 위가 현재여야 한다.
+   */
+  bySession: SessionBucket[];
   /** 도구 호출 수. 많은 순. */
   tools: Array<{ key: string; calls: number }>;
   /** Bash 명령 첫 낱말. 많은 순. */
@@ -80,12 +102,19 @@ export function projectLabel(row: LocalRow): string {
   return parts.length ? parts.slice(-1)[0] : cleaned;
 }
 
-export function buildBoard(rows: LocalRow[], tools: ToolEvent[]): Board {
+export function buildBoard(
+  rows: LocalRow[],
+  tools: ToolEvent[],
+  titles: Map<string, string> = new Map(),
+  currentSessionId: string | null = null,
+): Board {
   const totals = emptyTotals();
   const sessions = new Set<string>();
   const daily = new Map<string, Totals>();
   const byProject = new Map<string, Totals>();
   const byModel = new Map<string, Totals>();
+  const bySession = new Map<string, Totals>();
+  const lastSeen = new Map<string, string>();
 
   for (const row of rows) {
     addRow(totals, row);
@@ -93,6 +122,10 @@ export function buildBoard(rows: LocalRow[], tools: ToolEvent[]): Board {
     bump(daily, kstDayOf(row.ts), row);
     bump(byProject, projectLabel(row), row);
     bump(byModel, row.model, row);
+    bump(bySession, row.sessionId, row);
+    // rows 는 시각 순이지만 그걸 가정하지 않는다 — 정렬이 바뀌면 조용히 틀린다.
+    const seen = lastSeen.get(row.sessionId);
+    if (!seen || row.ts > seen) lastSeen.set(row.sessionId, row.ts);
   }
 
   const toolCounts = new Map<string, number>();
@@ -112,9 +145,32 @@ export function buildBoard(rows: LocalRow[], tools: ToolEvent[]): Board {
     daily: toBuckets(daily).sort((a, b) => b.key.localeCompare(a.key)),
     byProject: toBuckets(byProject).sort((a, b) => total(b) - total(a)),
     byModel: toBuckets(byModel).sort((a, b) => total(b) - total(a)),
+    bySession: toBuckets(bySession)
+      .map((b) => ({
+        ...b,
+        label: titles.get(b.key) ?? b.key.slice(0, 8),
+        lastTs: lastSeen.get(b.key) ?? "",
+        isCurrent: currentSessionId
+          ? b.key === currentSessionId
+          : b.key === newestSession(lastSeen),
+      }))
+      .sort((a, b) => b.lastTs.localeCompare(a.lastTs)),
     tools: countList(toolCounts),
     shell: countList(shellCounts),
   };
+}
+
+/** 가장 최근에 응답이 있었던 세션. env 가 없을 때의 대체값이다. */
+function newestSession(lastSeen: Map<string, string>): string | null {
+  let best: string | null = null;
+  let bestTs = "";
+  for (const [id, ts] of lastSeen) {
+    if (ts > bestTs) {
+      bestTs = ts;
+      best = id;
+    }
+  }
+  return best;
 }
 
 function bump(map: Map<string, Totals>, key: string, row: LocalRow): void {

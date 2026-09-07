@@ -150,13 +150,19 @@ function str(v: unknown): string | null {
 // ---------------------------------------------------------------- 저장소
 
 /**
- * 계정마다 파일 하나. **append-only JSONL** 이다.
+ * 스냅샷 저장 위치. **홈 디렉토리다 — 레포 안이 아니다.**
  *
- * `data/` 는 gitignore 되어 있다 (실 재무 데이터와 같은 자리). 계정 UUID 가
- * 파일명에 들어가므로 커밋되면 안 된다.
+ * 전역 CLI 로 아무 프로젝트에서나 실행하는데 `process.cwd()` 를 쓰면 실행한
+ * 디렉토리마다 기록이 따로 쌓인다. 보정은 **누적**이 전부인데 그러면 영원히 안 쌓인다.
+ * 계정 UUID 가 파일명에 들어가므로 레포에 두면 커밋 사고 위험도 있다.
  */
+export function storeDir(): string {
+  return process.env.QUOTA_STORE_DIR || path.join(os.homedir(), ".claude-quota");
+}
+
+/** 계정마다 파일 하나. **append-only JSONL** 이다. */
 export function storePath(accountUuid: string): string {
-  return path.join(process.cwd(), "data", "quota", `${accountUuid}.jsonl`);
+  return path.join(storeDir(), `${accountUuid}.jsonl`);
 }
 
 export async function readSnapshots(accountUuid: string): Promise<Snapshot[]> {

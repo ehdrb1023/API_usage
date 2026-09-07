@@ -163,3 +163,66 @@ describe("quota-board/합계", () => {
     assert.equal(totalWithoutCache(board.totals), 100);
   });
 });
+
+describe("quota-board/bySession", () => {
+  it("최근 활동 순이다 — 쓴 양 순이 아니다", () => {
+    // "지금 이 세션 얼마 썼나" 가 이 축을 보는 이유다. 맨 위가 최근이어야 한다.
+    const board = buildBoard(
+      [
+        row({ sessionId: "big", ts: "2026-09-07T01:00:00.000Z", output: 99999 }),
+        row({ sessionId: "recent", ts: "2026-09-07T05:00:00.000Z", output: 1 }),
+      ],
+      [],
+    );
+    assert.deepEqual(board.bySession.map((b) => b.key), ["recent", "big"]);
+  });
+
+  it("세션 제목이 있으면 라벨로 쓴다", () => {
+    const board = buildBoard([row({ sessionId: "abcdef123456" })], [], new Map([["abcdef123456", "토큰 추적"]]));
+    assert.equal(board.bySession[0].label, "토큰 추적");
+  });
+
+  it("제목이 없으면 sessionId 앞자리로 대신한다 — 빈 라벨을 만들지 않는다", () => {
+    const board = buildBoard([row({ sessionId: "abcdef123456" })], []);
+    assert.equal(board.bySession[0].label, "abcdef12");
+  });
+
+  it("세션 id 를 넘기면 그 세션이 현재다", () => {
+    const board = buildBoard(
+      [
+        row({ sessionId: "mine", ts: "2026-09-07T01:00:00.000Z" }),
+        row({ sessionId: "other", ts: "2026-09-07T09:00:00.000Z" }),
+      ],
+      [],
+      new Map(),
+      "mine",
+    );
+    // 더 최근인 other 가 아니라 지정한 mine 이 현재여야 한다.
+    assert.deepEqual(
+      board.bySession.filter((b) => b.isCurrent).map((b) => b.key),
+      ["mine"],
+    );
+  });
+
+  it("세션 id 가 없으면 가장 최근 세션으로 대신한다", () => {
+    const board = buildBoard(
+      [
+        row({ sessionId: "old", ts: "2026-09-07T01:00:00.000Z" }),
+        row({ sessionId: "new", ts: "2026-09-07T09:00:00.000Z" }),
+      ],
+      [],
+    );
+    assert.deepEqual(
+      board.bySession.filter((b) => b.isCurrent).map((b) => b.key),
+      ["new"],
+    );
+  });
+
+  it("현재 세션은 최대 하나다", () => {
+    const board = buildBoard(
+      [row({ sessionId: "a" }), row({ sessionId: "b", ts: "2026-09-07T02:00:00.000Z" })],
+      [],
+    );
+    assert.equal(board.bySession.filter((b) => b.isCurrent).length, 1);
+  });
+});
