@@ -31,5 +31,8 @@
   },
   "bin": {
     "quota": "./bin/quota.mjs"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }
