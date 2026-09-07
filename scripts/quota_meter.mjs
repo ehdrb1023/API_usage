@@ -16,7 +16,7 @@
 
 import { scanLocalUsage } from "../lib/local/scan.ts";
 import { getQuota } from "../lib/quota.ts";
-import { buildBoard, rangeStart, total, totalWithoutCache } from "../lib/quota-board.ts";
+import { buildBoard, pickSession, rangeStart, total, totalWithoutCache } from "../lib/quota-board.ts";
 import { burnRate, humanDuration, severity } from "../lib/quota-meter.ts";
 
 const C = {
@@ -34,13 +34,19 @@ const TONE = { ok: C.ok, warn: C.warn, danger: C.danger };
 const args = process.argv.slice(2).filter((a) => a !== "meter");
 const WATCH = args.includes("--watch");
 const LINE = args.includes("--line");
+const LIST = args.includes("--list");
+/** 플래그가 아닌 첫 낱말 = 볼 세션. 세션 id 앞자리나 제목 일부. */
+const QUERY = args.find((a) => !a.startsWith("--")) ?? "";
 const WIDTH = 40;
 
 const top = () => `${C.dim}┌${"─".repeat(WIDTH)}┐${C.off}`;
 const bottom = () => `${C.dim}└${"─".repeat(WIDTH)}┘${C.off}`;
 const divider = () => `${C.dim}├${"─".repeat(WIDTH)}┤${C.off}`;
 
-if (LINE) {
+if (LIST) {
+  const { board } = await read();
+  process.stdout.write(listSessions(board) + "\n");
+} else if (LINE) {
   process.stdout.write((await line()) + "\n");
 } else {
   await paint();
@@ -74,6 +80,33 @@ async function read() {
   return { board, quota };
 }
 
+/**
+ * 이 계기판이 가리킬 세션.
+ *
+ * 검색어가 있으면 그것으로 **고정**한다. 없으면 현재 세션(env) → 가장 최근 순.
+ * 검색어가 여러 개에 걸리거나 하나도 안 걸리면 `null` 과 후보를 함께 돌려준다 —
+ * 임의로 하나를 집으면 무엇을 보고 있는지 모른 채 숫자를 읽게 된다.
+ */
+function chooseSession(board) {
+  if (!QUERY) {
+    return { session: board.bySession.find((s) => s.isCurrent) ?? null, ambiguous: null };
+  }
+  const { match, candidates } = pickSession(board.bySession, QUERY);
+  return { session: match, ambiguous: match ? null : candidates };
+}
+
+function listSessions(board) {
+  const lines = [`${C.bold}세션 ${board.bySession.length}개${C.off}  ${C.dim}(오늘)${C.off}`, ""];
+  for (const s of board.bySession) {
+    const mark = s.isCurrent ? `${C.accent}●${C.off}` : " ";
+    lines.push(
+      `${mark} ${C.dim}${s.key.slice(0, 8)}${C.off}  ${pad(cut(s.label, 34), 34)} ${fmt(total(s)).padStart(8)}`,
+    );
+  }
+  lines.push("", `${C.dim}고정하려면:  quota meter <id앞자리 또는 제목일부> --watch${C.off}`);
+  return lines.join("\n");
+}
+
 // ---------------------------------------------------------------- 한 줄
 
 /** statusline·프롬프트에 박아 넣는 형태. 색은 넣되 상자는 없다. */
@@ -93,7 +126,7 @@ async function line() {
     parts.push(`${C.label}${short}${C.off} ${tone}${w.usedPercent}%${C.off}${tail}`);
   }
 
-  const me = board.bySession.find((s) => s.isCurrent);
+  const { session: me } = chooseSession(board);
   if (me) parts.push(`${C.label}이 세션${C.off} ${C.accent}${fmt(total(me))}${C.off}`);
   return parts.join(`${C.dim} · ${C.off}`);
 }
@@ -105,10 +138,20 @@ async function paint() {
   const out = [];
   if (WATCH) out.push("\x1b[2J\x1b[H");
 
-  const me = board.bySession.find((s) => s.isCurrent);
+  const { session: me, ambiguous } = chooseSession(board);
   out.push(top());
 
-  if (me) {
+  if (ambiguous) {
+    out.push(row(`${C.warn}"${cut(QUERY, 20)}" 로 못 고른다${C.off}`));
+    if (ambiguous.length === 0) {
+      out.push(row(`${C.dim}맞는 세션이 없다${C.off}`));
+    } else {
+      for (const s of ambiguous.slice(0, 4)) {
+        out.push(row(`${C.dim}  ${s.key.slice(0, 8)} ${cut(s.label, 24)}${C.off}`));
+      }
+    }
+    out.push(row(`${C.dim}quota meter --list 로 목록${C.off}`));
+  } else if (me) {
     out.push(row(`${C.accent}●${C.off} ${C.bold}${cut(me.label, WIDTH - 6)}${C.off}`));
     out.push(
       row(

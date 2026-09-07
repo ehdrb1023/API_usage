@@ -58,6 +58,8 @@ if (first === "--help" || first === "-h") {
       "  quota meter          계기판 (작은 창용)",
       "  quota meter --watch  5초마다 갱신",
       "  quota meter --line   한 줄만",
+      "  quota meter --list   세션 목록",
+      "  quota meter <검색어>  그 세션에 고정 (id앞자리·제목일부)",
       "  quota snap           한도 스냅샷 기록",
       "  quota report         보정값 · 남은 양 추정",
       "",

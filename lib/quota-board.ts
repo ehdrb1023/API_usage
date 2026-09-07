@@ -217,3 +217,31 @@ export const RANGES: Record<string, number> = {
   "7d": 7,
   "30d": 30,
 };
+
+/**
+ * 세션 고르기 — 계기판을 한 세션에 **고정**할 때 쓴다.
+ *
+ * 별도 창에서 `--watch` 로 띄우면 `CLAUDE_CODE_SESSION_ID` 가 없어서 "가장 최근"
+ * 으로 떨어지는데, 다른 세션이 응답할 때마다 대상이 옮겨 다닌다. 계기판이 가리키는
+ * 대상이 저절로 바뀌면 계기판이 아니다.
+ *
+ * 찾는 방법 두 가지 — **세션 id 앞자리**와 **제목 일부**. 둘 다 대소문자를 안 가린다.
+ * 여러 개가 걸리면 **고르지 않고 후보를 돌려준다.** 임의로 하나를 집으면 사용자는
+ * 자기가 무엇을 보고 있는지 모른 채 숫자를 읽게 된다.
+ */
+export function pickSession(
+  sessions: SessionBucket[],
+  query: string,
+): { match: SessionBucket | null; candidates: SessionBucket[] } {
+  const q = query.trim().toLowerCase();
+  if (!q) return { match: null, candidates: [] };
+
+  // id 앞자리가 정확히 걸리면 그것만 본다 — 제목에 우연히 섞이는 경우를 이긴다.
+  const byId = sessions.filter((s) => s.key.toLowerCase().startsWith(q));
+  if (byId.length === 1) return { match: byId[0], candidates: [] };
+  if (byId.length > 1) return { match: null, candidates: byId };
+
+  const byLabel = sessions.filter((s) => s.label.toLowerCase().includes(q));
+  if (byLabel.length === 1) return { match: byLabel[0], candidates: [] };
+  return { match: null, candidates: byLabel };
+}

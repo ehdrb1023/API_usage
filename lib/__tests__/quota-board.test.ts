@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 
 import {
   buildBoard,
+  pickSession,
   projectLabel,
   rangeStart,
   total,
@@ -224,5 +225,50 @@ describe("quota-board/bySession", () => {
       [],
     );
     assert.equal(board.bySession.filter((b) => b.isCurrent).length, 1);
+  });
+});
+
+describe("quota-board/pickSession", () => {
+  const sessions = [
+    { key: "f6fee229-aaa", label: "토큰 사용량 추적", lastTs: "", isCurrent: true, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 },
+    { key: "665b4a43-bbb", label: "El-transaction 테스트", lastTs: "", isCurrent: false, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 },
+    { key: "666359cd-ccc", label: "훅 우회해서 push", lastTs: "", isCurrent: false, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, calls: 0 },
+  ];
+
+  it("세션 id 앞자리로 고른다", () => {
+    assert.equal(pickSession(sessions, "665b4a43").match?.key, "665b4a43-bbb");
+  });
+
+  it("제목 일부로 고른다", () => {
+    assert.equal(pickSession(sessions, "훅 우회").match?.key, "666359cd-ccc");
+  });
+
+  it("대소문자를 안 가린다", () => {
+    assert.equal(pickSession(sessions, "EL-TRANSACTION").match?.key, "665b4a43-bbb");
+  });
+
+  it("★ 여러 개 걸리면 고르지 않고 후보를 준다", () => {
+    // 임의로 하나를 집으면 무엇을 보고 있는지 모른 채 숫자를 읽게 된다.
+    const r = pickSession(sessions, "66");
+    assert.equal(r.match, null);
+    assert.deepEqual(r.candidates.map((s) => s.key), ["665b4a43-bbb", "666359cd-ccc"]);
+  });
+
+  it("하나도 없으면 빈 후보를 준다", () => {
+    const r = pickSession(sessions, "zzzz");
+    assert.equal(r.match, null);
+    assert.deepEqual(r.candidates, []);
+  });
+
+  it("id 앞자리가 제목 우연 일치를 이긴다", () => {
+    const mixed = [
+      { ...sessions[0], key: "abc12345", label: "무관" },
+      { ...sessions[1], key: "zzz99999", label: "abc12345 를 언급한 세션" },
+    ];
+    assert.equal(pickSession(mixed, "abc12345").match?.key, "abc12345");
+  });
+
+  it("빈 검색어는 아무것도 고르지 않는다", () => {
+    assert.equal(pickSession(sessions, "   ").match, null);
   });
 });
