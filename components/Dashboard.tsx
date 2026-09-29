@@ -31,7 +31,10 @@ export default function Dashboard({
   series,
   mode,
 }: Props) {
-  const [service, setService] = useState<ServiceId>(series[0]?.service ?? "claude");
+  // 처음 여는 탭은 조회에 성공한 계정. 실패한 탭(지표 정의가 빈 자리)부터 열면 빈 화면이다.
+  const [service, setService] = useState<ServiceId>(
+    (series.find((s) => s.metricSpecs.length > 0) ?? series[0])?.service ?? "claude",
+  );
   const [range, setRange] = useState<RangeId>("30d");
   /** 서비스별 표에서 선택한 API 키. null 이면 전체 합계를 본다. */
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -155,6 +158,13 @@ export default function Dashboard({
         </div>
       )}
 
+      {/* 조회에 실패한 탭은 지표 정의가 비어 있다 — 카드·차트 대신 아래 각주의 사유만 보인다. */}
+      {active.metricSpecs.length === 0 ? (
+        <p className="card p-6 text-sm" style={{ color: "var(--status-critical)" }}>
+          {active.label} 데이터를 불러오지 못했습니다. 사유는 아래에 있습니다.
+        </p>
+      ) : (
+        <>
       <StatCards series={active} kpis={view.kpis} range={range} anchor={view.anchor} />
 
       <div className="mt-6">
@@ -193,6 +203,8 @@ export default function Dashboard({
       <div className="mt-6">
         <DailyTable series={active} points={view.points} deltas={view.deltas} />
       </div>
+        </>
+      )}
 
       {/* 일 경계 경고는 상단 배너로 옮겼다. 여기엔 탭별 상세만 남긴다. */}
       <footer
