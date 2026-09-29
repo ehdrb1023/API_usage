@@ -2,6 +2,7 @@
 
 import type { BreakdownRow } from "@/lib/analytics";
 import { RANGES } from "@/lib/analytics";
+import { StarButton } from "@/components/FavoriteKeys";
 import { formatMetric, formatPct, formatUsd } from "@/lib/format";
 import type { KeyLocation, KeyLocationResult } from "@/lib/key-locations";
 import type { KeyLocationsView, RangeId, ServiceSeries } from "@/lib/types";
@@ -23,6 +24,9 @@ type Props = {
   onSelect?: (key: string | null) => void;
   /** 키 사용처. 넘기면 "사용처" 칸이 생긴다 (Vercel 토큰이 있을 때만 온다). */
   locations?: KeyLocationsView;
+  /** 넘기면 이름 앞에 ☆ 가 생긴다. 키별 표에만 쓴다. */
+  favoriteIds?: string[];
+  onToggleFavorite?: (key: string) => void;
 };
 
 /**
@@ -41,6 +45,8 @@ export default function BreakdownTable({
   selectedKey = null,
   onSelect,
   locations,
+  favoriteIds = [],
+  onToggleFavorite,
 }: Props) {
   const rangeLabel = RANGES.find((r) => r.id === range)?.label ?? "";
   const axis = axisLabel ?? series.breakdownLabel;
@@ -106,6 +112,13 @@ export default function BreakdownTable({
               >
                 <th scope="row" className="px-4 py-2.5 text-left font-normal sm:px-2">
                   <span className="flex items-center gap-2">
+                    {onToggleFavorite && (
+                      <StarButton
+                        on={favoriteIds.includes(row.key)}
+                        label={row.label}
+                        onClick={() => onToggleFavorite(row.key)}
+                      />
+                    )}
                     <span
                       aria-hidden="true"
                       className="inline-block size-2 shrink-0 rounded-full"

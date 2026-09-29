@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import BreakdownTable from "@/components/BreakdownTable";
 import DailyTable from "@/components/DailyTable";
+import FavoriteKeys from "@/components/FavoriteKeys";
 import RangePicker from "@/components/RangePicker";
 import ServiceTabs from "@/components/ServiceTabs";
 import StatCards from "@/components/StatCards";
@@ -19,6 +20,7 @@ import {
   rangeBounds,
   sliceRange,
 } from "@/lib/analytics";
+import { useFavorites } from "@/lib/favorites";
 import { formatDateLong } from "@/lib/format";
 import type { RangeId, ServiceId, ServiceSeries } from "@/lib/types";
 
@@ -38,6 +40,7 @@ export default function Dashboard({
   const [range, setRange] = useState<RangeId>("30d");
   /** 서비스별 표에서 선택한 API 키. null 이면 전체 합계를 본다. */
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const { favorites, toggle: toggleFavorite } = useFavorites();
   const active = series.find((s) => s.service === service) ?? series[0];
 
   const view = useMemo(() => {
@@ -165,6 +168,19 @@ export default function Dashboard({
         </p>
       ) : (
         <>
+      {active.altBreakdown && (
+        <FavoriteKeys
+          series={active}
+          range={range}
+          rows={view.altBreakdown}
+          favoriteIds={favorites[active.service] ?? []}
+          locations={active.keyLocations}
+          selectedKey={view.focusKey}
+          onToggleFavorite={(keyId) => toggleFavorite(active.service, keyId)}
+          onSelect={setSelectedKey}
+        />
+      )}
+
       <StatCards series={active} kpis={view.kpis} range={range} anchor={view.anchor} />
 
       <div className="mt-6">
@@ -197,6 +213,8 @@ export default function Dashboard({
             selectedKey={view.focusKey}
             onSelect={setSelectedKey}
             locations={active.keyLocations}
+            favoriteIds={favorites[active.service] ?? []}
+            onToggleFavorite={(keyId) => toggleFavorite(active.service, keyId)}
           />
         </div>
       )}
