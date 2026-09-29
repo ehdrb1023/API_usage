@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { unstable_cache } from "next/cache";
 
-import { buildDailyPoints, type UsageRow } from "@/lib/adapters/core";
+import { buildDailyPoints } from "@/lib/adapters/core";
 import { loadClientKeyNames } from "@/lib/client-keys";
 import { kstCacheKey } from "@/lib/kst";
 import { computeRates } from "@/lib/token-rates";
@@ -209,14 +209,9 @@ const daysCache = new Map<ServiceId, (kstDay: string) => Promise<VendorDays>>(
 const daysFallback = new Map<ServiceId, ReturnType<typeof createStaleFallback<VendorDays>>>(
   SERVICES.map((s) => [s.id, createStaleFallback<VendorDays>()]),
 );
-const todayFallback = new Map<ServiceId, ReturnType<typeof createStaleFallback<UsageRow[]>>>(
-  SERVICES.map((s) => [s.id, createStaleFallback<UsageRow[]>()]),
-);
 
 /**
  * KST 하루로 재구성한 사용량 + 역산한 단가 + 키 목록.
- * 하루 캐시를 대시보드와 미니 위젯이 함께 쓴다 — 미니 위젯은 단가·키 목록만 꺼내
- * "KST 오늘" 에 다시 곱한다.
  */
 export async function getVendorDays(id: ServiceId): Promise<Fresh<VendorDays>> {
   if (getDataSourceMode() === "mock") {
@@ -224,58 +219,4 @@ export async function getVendorDays(id: ServiceId): Promise<Fresh<VendorDays>> {
     return { value, at: Date.now(), stale: false };
   }
   return daysFallback.get(id)!(() => daysCache.get(id)!(kstCacheKey()));
-}
-
-// ---------------------------------------------------------------- 실시간(KST)
-
-/**
- * 실시간 갱신 주기(초). `.env` 의 `LIVE_REFRESH_SECONDS` 로 조절한다.
- *
- * ⚠️ 기본값 60초는 **한도에 가깝다.** Anthropic Admin API 는 시간당 90회인데
- *    60초 주기면 60회/시간을 쓴다. 같은 조직 키로 도는 인스턴스가 둘이면(로컬 개발
- *    서버 + 배포본) 넘긴다. 그럴 때는 120 이상으로 올리는 게 맞다.
- *    30초 미만은 받지 않는다 — 벤더가 그만큼 자주 갱신해 주지도 않는다.
- *
- * ⚠️ 서비스가 늘면 주기당 호출도 그만큼 늘어난다. GPT 를 켜면 벤더가 둘이라
- *    각각 60회/시간이 된다 (쿼터는 벤더별로 따로 세므로 서로를 잡아먹지는 않는다).
- */
-export function liveRefreshSeconds(): number {
-  const raw = Number(process.env.LIVE_REFRESH_SECONDS);
-  return Number.isFinite(raw) && raw >= 30 ? Math.floor(raw) : 60;
-}
-
-/**
- * 캐시 키로 쓸 시간 구간. `revalidate` 초를 쓰지 않고 구간 문자열을 키에 넣는
- * 이유는 날짜 키와 같다 — "마지막 호출 + N초" 는 탭이 여러 개면 갱신 시점이
- * 제각각이 된다. 구간이 바뀌는 순간에만 미스가 나게 하면, 탭이 몇 개든 벤더 호출은
- * 구간당 1회로 고정된다.
- */
-export function liveBucket(now: Date = new Date()): string {
-  const ms = liveRefreshSeconds() * 1000;
-  return new Date(Math.floor(now.getTime() / ms) * ms).toISOString();
-}
-
-const todayCache = new Map<
-  ServiceId,
-  (bucket: string, from: string, to: string) => Promise<UsageRow[]>
->(
-  SERVICES.map((service) => [
-    service.id,
-    unstable_cache(
-      async (_bucket: string, from: string, to: string) =>
-        service.fetchTodayUsage(from, to),
-      [`vendor-today:${service.id}`],
-      // 구간 문자열이 키에 들어가므로 이 값은 상한선일 뿐이다.
-      { revalidate: 600, tags: ["usage", `usage:${service.id}`, "live"] },
-    ),
-  ]),
-);
-
-/** KST 오늘 구간의 사용량 행. 미니 위젯 전용. */
-export async function getTodayUsage(
-  id: ServiceId,
-  from: string,
-  to: string,
-): Promise<Fresh<UsageRow[]>> {
-  return todayFallback.get(id)!(() => todayCache.get(id)!(liveBucket(), from, to));
 }

@@ -7,7 +7,7 @@
  * 한 벤더를 붙이는 데 필요한 것은 아래 `ServiceDefinition` 하나뿐이다:
  *   - 화면 문구 (탭 이름·축 이름·주의문)
  *   - 지표 정의 (`metricSpecs`) 와 집계 옵션 (`build`)
- *   - 실 API 조회 두 개 (`fetchDays` = 본문, `fetchTodayUsage` = 미니 위젯)
+ *   - 실 API 조회 (`fetchDays`)
  *   - 목업 파일 이름과 변환 함수
  *
  * 집계·안분·KST 접기·단가 역산은 전부 공통 코드가 한다. 벤더 파일에 그 로직을
@@ -26,10 +26,9 @@ import {
   toCostDays as anthropicCostDays,
   toDayRows as anthropicDayRows,
   toHourBuckets as anthropicHourBuckets,
-  toUsageRows as anthropicUsageRows,
   type AnthropicRaw,
 } from "@/lib/adapters/anthropic";
-import type { BuildOptions, DayRows, KeyMeta, UsageRow } from "@/lib/adapters/core";
+import type { BuildOptions, DayRows, KeyMeta } from "@/lib/adapters/core";
 import {
   OPENAI_BUILD,
   OPENAI_METRICS,
@@ -37,7 +36,6 @@ import {
   toCostDays as openaiCostDays,
   toDayRows as openaiDayRows,
   toHourBuckets as openaiHourBuckets,
-  toUsageRows as openaiUsageRows,
   type OpenAiRaw,
 } from "@/lib/adapters/openai";
 import {
@@ -85,8 +83,6 @@ export type ServiceDefinition = {
   isConfigured: () => boolean;
   /** 본문 대시보드용 — 전월 1일(KST) ~ 지금. */
   fetchDays: () => Promise<VendorDays>;
-  /** 미니 위젯용 — KST 오늘 구간의 1시간 버킷. */
-  fetchTodayUsage: (from: string, to: string) => Promise<UsageRow[]>;
   /** 실 API 모드에서 화면 하단에 띄울 주의문. */
   apiNote: string;
   /**
@@ -179,20 +175,6 @@ function makeAnthropic(account: ClaudeAccount): ServiceDefinition {
       }),
       keys,
     };
-  },
-
-  fetchTodayUsage: async (from, to) => {
-    const buckets = await fetchAllAnthropicUsageBuckets(
-      {
-        starting_at: from,
-        ending_at: to,
-        bucket_width: "1h",
-        limit: 24,
-        group_by: ["model", "api_key_id"],
-      },
-      auth(),
-    );
-    return buckets.flatMap((b) => anthropicUsageRows(b.results));
   },
 
   apiNote:
@@ -293,17 +275,6 @@ const OPENAI: ServiceDefinition = {
       }),
       keys,
     };
-  },
-
-  fetchTodayUsage: async (from, to) => {
-    const buckets = await fetchAllOpenAiUsageBuckets({
-      start_time: toUnixSeconds(from),
-      end_time: toUnixSeconds(to),
-      bucket_width: "1h",
-      limit: 24,
-      group_by: ["model", "project_id", "api_key_id"],
-    });
-    return buckets.flatMap((b) => openaiUsageRows(b.results));
   },
 
   apiNote:

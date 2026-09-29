@@ -7,11 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "mini": "bash scripts/mini/open-mini.sh",
-    "quota:snap": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_calibration.mjs snap",
-    "quota:report": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_calibration.mjs report",
-    "test": "node --import ./lib/clients/__tests__/ts-resolve.mjs --test \"lib/**/__tests__/*.test.ts\"",
-    "quota:board": "node --import ./lib/clients/__tests__/ts-resolve.mjs scripts/quota_board.mjs"
+    "test": "node --import ./lib/clients/__tests__/ts-resolve.mjs --test \"lib/**/__tests__/*.test.ts\""
   },
   "dependencies": {
     "next": "16.3.1",
@@ -28,9 +24,6 @@
     "eslint-config-next": "16.3.1",
     "tailwindcss": "^4",
     "typescript": "^5"
-  },
-  "bin": {
-    "quota": "./bin/quota.mjs"
   },
   "engines": {
     "node": ">=22.18"

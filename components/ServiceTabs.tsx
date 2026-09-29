@@ -2,31 +2,16 @@
 
 import type { ServiceId, ServiceSeries } from "@/lib/types";
 
-/**
- * "그 외 API" 는 서비스가 아니라 **목록 화면**이라 ServiceId 가 아니다.
- * 탭 값은 서비스 id 이거나 이 문자열이다.
- */
-export const VENDORS_TAB = "vendors" as const;
-/** 선불 잔액도 서비스가 아니라 목록 화면이다 (`components/PrepaidBalance.tsx`). */
-export const PREPAID_TAB = "prepaid" as const;
-export type TabValue = ServiceId | typeof VENDORS_TAB | typeof PREPAID_TAB;
-
 type Props = {
   services: ServiceSeries[];
-  value: TabValue;
-  onChange: (next: TabValue) => void;
-  /** 그 외 API 탭에 띄울 개수. 0 이면 탭 자체를 안 그린다. */
-  vendorCount?: number;
-  /** 선불 잔액 탭에 띄울 주머니 개수. 0 이면 탭 자체를 안 그린다. */
-  prepaidCount?: number;
+  value: ServiceId;
+  onChange: (next: ServiceId) => void;
 };
 
 export default function ServiceTabs({
   services,
   value,
   onChange,
-  vendorCount = 0,
-  prepaidCount = 0,
 }: Props) {
   return (
     <div
@@ -54,47 +39,6 @@ export default function ServiceTabs({
           </button>
         );
       })}
-
-      {vendorCount > 0 && (
-        <button
-          role="tab"
-          type="button"
-          aria-selected={value === VENDORS_TAB}
-          onClick={() => onChange(VENDORS_TAB)}
-          className="cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
-          style={{
-            background: value === VENDORS_TAB ? "var(--text-primary)" : "transparent",
-            color: value === VENDORS_TAB ? "var(--surface-1)" : "var(--text-secondary)",
-          }}
-        >
-          그 외 API
-          <em
-            className="ml-1.5 text-xs not-italic"
-            style={{ opacity: 0.7 }}
-          >
-            {vendorCount}
-          </em>
-        </button>
-      )}
-
-      {prepaidCount > 0 && (
-        <button
-          role="tab"
-          type="button"
-          aria-selected={value === PREPAID_TAB}
-          onClick={() => onChange(PREPAID_TAB)}
-          className="cursor-pointer rounded-md px-4 py-1.5 text-sm font-medium transition-colors"
-          style={{
-            background: value === PREPAID_TAB ? "var(--text-primary)" : "transparent",
-            color: value === PREPAID_TAB ? "var(--surface-1)" : "var(--text-secondary)",
-          }}
-        >
-          선불 잔액
-          <em className="ml-1.5 text-xs not-italic" style={{ opacity: 0.7 }}>
-            {prepaidCount}
-          </em>
-        </button>
-      )}
     </div>
   );
 }
