@@ -1,7 +1,7 @@
 # API 사용량
 
 **계정별로 어떤 API 키가 얼마나 쓰였는지**를 한국시간 기준으로 한 화면에서 본다.
-Claude(Anthropic Admin API) 계정 3개 + GPT(OpenAI Admin API).
+Claude(Anthropic Admin API, speciai 조직) + GPT(OpenAI Admin API).
 지금은 **목업 데이터**로 동작하며, 환경변수 하나로 실제 API 로 전환된다.
 
 > **범위: Admin API 로 조회되는 사용량만** (2026-09-29).

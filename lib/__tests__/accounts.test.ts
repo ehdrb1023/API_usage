@@ -86,18 +86,18 @@ describe("parseAccountLabels", () => {
   it("알려진 id 만 통과시킨다", () => {
     // 오타를 조용히 통과시키면 이름이 안 바뀌는 이유를 찾을 수 없다.
     const out = parseAccountLabels({
-      labels: { "claude-2": "본사", claude9: "없는 계정", gpt: "GPT 조직" },
+      labels: { claude: "본사", claude9: "없는 계정", gpt: "GPT 조직" },
     });
 
-    assert.deepEqual(out, { "claude-2": "본사", gpt: "GPT 조직" });
+    assert.deepEqual(out, { claude: "본사", gpt: "GPT 조직" });
   });
 
   it("빈 이름은 버리고 앞뒤 공백은 뗀다", () => {
     const out = parseAccountLabels({
-      labels: { claude: "   ", "claude-3": "  연구소  " },
+      labels: { claude: "   ", gpt: "  연구소  " },
     });
 
-    assert.deepEqual(out, { "claude-3": "연구소" });
+    assert.deepEqual(out, { gpt: "연구소" });
   });
 
   it("파일 모양이 아니면 빈 값 — 던지지 않는다", () => {

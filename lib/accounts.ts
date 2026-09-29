@@ -41,8 +41,6 @@ export type ClaudeAccount = {
  */
 export const CLAUDE_ACCOUNTS: ClaudeAccount[] = [
   { id: "claude", defaultLabel: "Claude 1", envVar: "ANTHROPIC_ADMIN_KEY" },
-  { id: "claude-2", defaultLabel: "Claude 2", envVar: "ANTHROPIC_ADMIN_KEY_2" },
-  { id: "claude-3", defaultLabel: "Claude 3", envVar: "ANTHROPIC_ADMIN_KEY_3" },
 ];
 
 /** `.env.example` 의 자리표시자를 진짜 키로 오인하지 않도록 (클라이언트와 같은 규칙). */

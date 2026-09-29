@@ -21,13 +21,13 @@ import type { KeyLocationResult } from "@/lib/key-locations";
  *
  * 계정별 키 환경변수와 표시 이름은 `lib/accounts.ts` 가 들고 있다.
  */
-export type ServiceId = "claude" | "claude-2" | "claude-3" | "gpt";
+export type ServiceId = "claude" | "gpt";
 
 /**
  * 알려진 서비스 id 전부. **런타임 검증용**이다 (설정 파일의 오타 거르기 등).
  * `ServiceId` 를 늘리면 여기도 늘려야 하고, 안 늘리면 타입 검사에서 걸린다.
  */
-export const SERVICE_IDS = ["claude", "claude-2", "claude-3", "gpt"] as const satisfies
+export const SERVICE_IDS = ["claude", "gpt"] as const satisfies
   readonly ServiceId[];
 
 export function isServiceId(value: unknown): value is ServiceId {
