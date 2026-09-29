@@ -196,6 +196,7 @@ export default function Dashboard({
             note={active.altBreakdown.note}
             selectedKey={view.focusKey}
             onSelect={setSelectedKey}
+            locations={active.keyLocations}
           />
         </div>
       )}

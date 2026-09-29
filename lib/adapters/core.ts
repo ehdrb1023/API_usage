@@ -62,6 +62,11 @@ export type KeyMeta = {
   /** "active" | "inactive" | "archived" (새 값이 올 수 있어 문자열로 받는다) */
   status: string;
   partial_key_hint?: string | null;
+  /**
+   * 사용처 대조(`lib/key-locations.ts`)에 쓸 **벤더 콘솔 이름 그대로**.
+   * `name` 을 표시용으로 가공할 때만 둔다 (GPT 는 `프로젝트 / 키` 로 붙인다).
+   */
+  matchName?: string;
 };
 
 export type BuildOptions = {

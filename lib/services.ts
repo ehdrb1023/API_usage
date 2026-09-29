@@ -57,6 +57,7 @@ import {
   requireAdminKey,
   type ClaudeAccount,
 } from "@/lib/accounts";
+import type { KeyFamily } from "@/lib/key-locations";
 import { buildKstDays, type KstDaysResult } from "@/lib/kst-days";
 import { kstMonthWindow } from "@/lib/kst";
 import type { MetricSpec, ServiceId } from "@/lib/types";
@@ -73,6 +74,8 @@ export type ServiceDefinition = {
   breakdownLabel: string;
   /** 보조 축. Claude 는 API 키(= 거래처), GPT 는 프로젝트. */
   altBreakdown: { label: string; notice?: string; note?: string };
+  /** 키 사용처 대조에 쓸 값 접두사·변수 이름 (`lib/key-locations.ts`). */
+  keyFamily: KeyFamily;
   metricSpecs: MetricSpec[];
   primaryMetric: string;
   build: BuildOptions;
@@ -121,6 +124,10 @@ function makeAnthropic(account: ClaudeAccount): ServiceDefinition {
       "키별 비용은 같은 날·같은 모델·같은 토큰 종류의 토큰 수 비율로 안분한 추정치입니다. " +
       "토큰 수는 usage_report 실측값입니다. " +
       "표시 이름은 config/client-keys.json 에서 바꿀 수 있습니다 (작성법은 config/README.md).",
+  },
+  keyFamily: {
+    valuePrefix: "sk-ant-api",
+    varName: /ANTHROPIC|CLAUDE/i,
   },
   metricSpecs: ANTHROPIC_METRICS,
   primaryMetric: ANTHROPIC_PRIMARY_METRIC,
@@ -236,6 +243,12 @@ const OPENAI: ServiceDefinition = {
       "키별 비용은 같은 날·같은 모델·같은 토큰 종류의 토큰 수 비율로 안분한 " +
       "추정치입니다. 토큰 수는 usage 실측값입니다.",
   },
+  keyFamily: {
+    valuePrefix: "sk-",
+    // Anthropic 키와 관리자 키도 `sk-` 로 시작한다.
+    excludePrefixes: ["sk-ant-", "sk-admin-"],
+    varName: /OPENAI|GPT/i,
+  },
   metricSpecs: OPENAI_METRICS,
   primaryMetric: OPENAI_PRIMARY_METRIC,
   build: OPENAI_BUILD,
@@ -329,6 +342,7 @@ async function openaiKeyNames(): Promise<KeyMeta[]> {
             // 키 목록에는 상태 필드가 없다. 프로젝트가 보관되면 키도 못 쓴다.
             status: p.status,
             partial_key_hint: k.redacted_value ?? null,
+            matchName: k.name ?? undefined,
           }),
         );
       } catch (error) {

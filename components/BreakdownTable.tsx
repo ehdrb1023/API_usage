@@ -3,7 +3,8 @@
 import type { BreakdownRow } from "@/lib/analytics";
 import { RANGES } from "@/lib/analytics";
 import { formatMetric, formatPct, formatUsd } from "@/lib/format";
-import type { RangeId, ServiceSeries } from "@/lib/types";
+import type { KeyLocation, KeyLocationResult } from "@/lib/key-locations";
+import type { KeyLocationsView, RangeId, ServiceSeries } from "@/lib/types";
 
 type Props = {
   series: ServiceSeries;
@@ -20,6 +21,8 @@ type Props = {
    * 넘기지 않으면 지금까지처럼 정적인 표로 남는다 (모델별 표가 그렇다).
    */
   onSelect?: (key: string | null) => void;
+  /** 키 사용처. 넘기면 "사용처" 칸이 생긴다 (Vercel 토큰이 있을 때만 온다). */
+  locations?: KeyLocationsView;
 };
 
 /**
@@ -37,11 +40,13 @@ export default function BreakdownTable({
   note,
   selectedKey = null,
   onSelect,
+  locations,
 }: Props) {
   const rangeLabel = RANGES.find((r) => r.id === range)?.label ?? "";
   const axis = axisLabel ?? series.breakdownLabel;
   const total = rows.reduce((s, r) => s + r.costUsd, 0);
   const selectable = typeof onSelect === "function";
+  const withLocations = !!locations;
 
   /** 같은 행을 다시 누르면 해제. */
   const toggle = (key: string) => onSelect?.(selectedKey === key ? null : key);
@@ -66,6 +71,11 @@ export default function BreakdownTable({
               <th scope="col" className="px-4 py-2 font-medium sm:px-2">
                 {axis}
               </th>
+              {withLocations && (
+                <th scope="col" className="px-2 py-2 font-medium">
+                  사용처
+                </th>
+              )}
               <th scope="col" className="px-2 py-2 text-right font-medium">
                 비용
               </th>
@@ -148,6 +158,11 @@ export default function BreakdownTable({
                     )}
                   </span>
                 </th>
+                {withLocations && (
+                  <td className="px-2 py-2.5 align-top">
+                    <LocationCell result={locations.byKey[row.key]} />
+                  </td>
+                )}
                 <td className="tabular px-2 py-2.5 text-right font-medium">
                   {formatUsd(row.costUsd)}
                 </td>
@@ -173,7 +188,7 @@ export default function BreakdownTable({
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + series.metricSpecs.length}
+                  colSpan={3 + (withLocations ? 1 : 0) + series.metricSpecs.length}
                   className="px-2 py-8 text-center text-sm"
                   style={{ color: "var(--text-muted)" }}
                 >
@@ -191,6 +206,7 @@ export default function BreakdownTable({
                 <th scope="row" className="px-4 py-2.5 text-left font-semibold sm:px-2">
                   합계
                 </th>
+                {withLocations && <td />}
                 <td className="tabular px-2 py-2.5 text-right font-semibold">
                   {formatUsd(total)}
                 </td>
@@ -214,11 +230,104 @@ export default function BreakdownTable({
         </table>
       </div>
 
+      {locations?.error && (
+        <p className="mt-3 text-xs" style={{ color: "var(--status-critical)" }}>
+          사용처를 조회하지 못했습니다 — {locations.error}
+        </p>
+      )}
+      {withLocations && !locations.error && (
+        <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
+          사용처는 Vercel 프로젝트 {locations.projectCount}개와 대조했습니다. 1차로 키 이름과
+          프로젝트 이름을, 2차로 환경변수 값을 키 힌트와 맞춥니다. Vercel 이 &quot;sensitive&quot;
+          로 저장한 변수는 값을 읽을 수 없어 &quot;값 비공개&quot; 로 표시되며 이름 대조만 근거입니다.
+          자동으로 안 잡히는 키는 config/key-locations.json 에 지정하세요.
+        </p>
+      )}
+
       {note && (
         <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
           {note}
         </p>
       )}
     </section>
+  );
+}
+
+const BY_LABEL: Record<KeyLocation["by"], string> = {
+  value: "값으로 찾음",
+  manual: "수동 지정",
+  name: "이름 일치",
+  similar: "이름 유사",
+};
+
+const VALUE_BADGE: Record<KeyLocation["value"], { text: string; color: string; title: string }> = {
+  match: {
+    text: "값 일치",
+    color: "var(--status-good)",
+    title: "환경변수 값이 이 키와 같습니다.",
+  },
+  mismatch: {
+    text: "다른 키",
+    color: "var(--status-critical)",
+    title: "이 프로젝트에는 같은 벤더의 다른 키가 들어 있습니다. 이름만 비슷한 것일 수 있습니다.",
+  },
+  sensitive: {
+    text: "값 비공개",
+    color: "var(--text-muted)",
+    title: "키 변수가 sensitive 타입이라 값을 읽을 수 없습니다. 이름 대조만 근거입니다.",
+  },
+  none: {
+    text: "키 변수 없음",
+    color: "var(--series-4)",
+    title: "이 프로젝트에서 이 벤더 키로 보이는 환경변수를 찾지 못했습니다.",
+  },
+};
+
+/** 사용처 칸 하나. 프로젝트 → 운영 도메인 링크 + 대조 근거. */
+function LocationCell({ result }: { result?: KeyLocationResult }) {
+  if (!result || result.locations.length === 0) {
+    return (
+      <span className="text-xs" style={{ color: "var(--text-muted)" }} title={result?.note}>
+        미확인
+      </span>
+    );
+  }
+  return (
+    <ul className="flex flex-col gap-1 text-xs" onClick={(e) => e.stopPropagation()}>
+      {result.locations.map((l) => {
+        const badge = VALUE_BADGE[l.value];
+        const domain = l.domains[0];
+        return (
+          <li key={l.project} className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+            <span className="font-medium" style={{ color: "var(--text-primary)" }}>
+              {l.project}
+            </span>
+            {domain && (
+              <a
+                href={`https://${domain}`}
+                target="_blank"
+                rel="noreferrer"
+                className="underline decoration-dotted"
+                style={{ color: "var(--text-secondary)" }}
+                title={l.domains.join("\n")}
+              >
+                {domain}
+                {l.domains.length > 1 ? ` 외 ${l.domains.length - 1}` : ""}
+              </a>
+            )}
+            <span
+              className="rounded px-1 py-px text-[10px] leading-tight"
+              style={{ border: `1px solid ${badge.color}`, color: badge.color }}
+              title={[badge.title, ...l.vars].join("\n")}
+            >
+              {badge.text}
+            </span>
+            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+              {BY_LABEL[l.by]}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

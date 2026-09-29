@@ -1,3 +1,5 @@
+import type { KeyLocationResult } from "@/lib/key-locations";
+
 /**
  * 대시보드가 다루는 정규화 모델.
  *
@@ -94,6 +96,18 @@ export type DayBoundary = {
   note: string;
 };
 
+/**
+ * 보조 축 키마다 **어느 배포 프로젝트에 들어가 있나** (`lib/key-locations.ts`).
+ * Vercel 토큰이 없으면 아예 안 온다.
+ */
+export type KeyLocationsView = {
+  byKey: Record<string, KeyLocationResult>;
+  /** 조회 자체가 실패했을 때의 사유. 있으면 byKey 는 비어 있다. */
+  error?: string;
+  /** 대조에 쓴 프로젝트 수 */
+  projectCount: number;
+};
+
 export type ServiceSeries = {
   service: ServiceId;
   label: string;
@@ -118,4 +132,5 @@ export type ServiceSeries = {
     /** 표 하단 각주 */
     note?: string;
   };
+  keyLocations?: KeyLocationsView;
 };

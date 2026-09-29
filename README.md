@@ -23,6 +23,24 @@ node --import ./lib/clients/__tests__/ts-resolve.mjs --test "lib/**/__tests__/*.
 npm run lint
 ```
 
+## 키 사용처 — 어느 홈페이지·프로젝트에 들어가 있나
+
+`.env` 에 `VERCEL_API_TOKEN`·`VERCEL_TEAM_ID` 가 있으면 키별 표에 **사용처** 칸이 생긴다.
+벤더 API 는 키가 어디서 쓰이는지 알려 주지 않으므로 Vercel 프로젝트와 두 단계로 대조한다.
+
+| 단계 | 무엇을 | 표시 |
+|---|---|---|
+| 1차 이름 | 키 이름 ↔ 프로젝트 이름 (`.` `_` → `-`, `test`·`key`·숫자 꼬리 무시) | `이름 일치` / `이름 유사` |
+| 수동 | `config/key-locations.json` 에 적은 것 — 이름 대조보다 우선 | `수동 지정` |
+| 2차 값 | 환경변수 값 ↔ 벤더 키 힌트(`앞...뒤4자`) — 전 프로젝트 대상 | `값 일치` / `다른 키` / `값 비공개` / `키 변수 없음` |
+
+- **Vercel "sensitive" 변수는 API 로도 값을 못 읽는다** (2026-09-29 기준 AI 키 변수 대부분).
+  그 프로젝트는 `값 비공개` 로 뜨고 이름 대조만 근거다.
+- 이름이 비슷한 프로젝트가 4개 이상이면 추측하지 않고 `미확인` 으로 둔다 (툴팁에 후보 수).
+- GPT 키 힌트는 `sk-proj-****뒤4자` 라 값 대조가 뒤 4자리로만 된다.
+- 키 원문은 저장하지 않는다. 복호화 즉시 `앞16자...뒤4자` 로 줄인다 (`lib/clients/vercel.ts`).
+- Vercel 조회는 KST 하루 1회 캐시된다 (프로젝트 60개 기준 약 4초).
+
 ## 하루 경계 — **전부 KST**
 
 **모든 탭이 한국시간 자정에 하루가 바뀐다.**
@@ -146,6 +164,7 @@ mock/                      목업 데이터 (실제 API 스키마와 동일한 �
 config/
   client-keys.json         ★ 보조 축 표시 이름 (api_key_id·project_id → 이름). 팀이 직접 관리
   accounts.json            Claude 계정 탭 표시 이름
+  key-locations.json       ★ 이름 대조로 안 잡히는 키 → Vercel 프로젝트 수동 지정
   README.md                  ↑ 작성법·우선순위·id 확인 방법
 
 lib/
@@ -166,6 +185,9 @@ lib/
   clients/openai.ts        Admin API 호출  ⚠️ 실키 미검증
   clients/types.ts         요청·응답 타입
 
+  key-locations.ts         키 사용처 대조 (1차 이름 · 2차 값) — 벤더 중립, 순수 함수
+  key-inventory.ts         Vercel 프로젝트 캐시 + 수동 지정 + 대조 조립
+  clients/vercel.ts        Vercel 프로젝트·도메인·환경변수 (복호화 즉시 마스킹)
   client-keys.ts           config/client-keys.json 로더 (벤더 클라이언트 아님)
   analytics.ts             기간 슬라이스, MoM, 급증일 판정
   types.ts                 UI 가 보는 정규화 모델

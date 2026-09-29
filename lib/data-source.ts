@@ -5,6 +5,7 @@ import { unstable_cache } from "next/cache";
 
 import { buildDailyPoints } from "@/lib/adapters/core";
 import { loadClientKeyNames } from "@/lib/client-keys";
+import { getKeyLocations } from "@/lib/key-inventory";
 import { kstCacheKey } from "@/lib/kst";
 import { computeRates } from "@/lib/token-rates";
 import {
@@ -66,6 +67,10 @@ export async function getServiceSeries(id: ServiceId): Promise<ServiceSeries> {
     loadAccountLabels(),
   ]);
 
+  // 목업 키는 가짜라 대조할 의미가 없다.
+  const keyLocations =
+    mode === "api" ? await getKeyLocations(days.keys, service.keyFamily) : undefined;
+
   return {
     service: service.id,
     label: accountLabels[service.id] ?? service.label,
@@ -81,6 +86,7 @@ export async function getServiceSeries(id: ServiceId): Promise<ServiceSeries> {
     source: mode,
     note: composeNote(service, mode),
     altBreakdown: service.altBreakdown,
+    keyLocations,
   };
 }
 
