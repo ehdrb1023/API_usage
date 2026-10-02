@@ -15,6 +15,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import type { ManualPayment } from "./ledger";
 import { receiptKey, type ChargeKind, type Receipt } from "./types";
 
 export const DATA_DIR = path.join("data", "billing");
@@ -24,6 +25,8 @@ const FILES = {
   cards: "cards.json",
   unparsed: "unparsed.json",
   subscriptions: "subscriptions.json",
+  /** 파서 양식이 없어 메일을 읽고 옮긴 결제 (토스·Google·이니시스 등). `ledger.ts` 참고. */
+  manual: "manual-payments.json",
 } as const;
 
 /** 영수증의 끝 4자리를 사람이 아는 이름으로 잇는다. */
@@ -88,6 +91,8 @@ async function writeJson(p: string, rows: unknown[]): Promise<void> {
 
 export const loadReceipts = (root = process.cwd()) =>
   readJson<Receipt>(file(root, FILES.receipts));
+export const loadManualPayments = (root = process.cwd()) =>
+  readJson<ManualPayment>(file(root, FILES.manual));
 export const loadCards = (root = process.cwd()) => readJson<Card>(file(root, FILES.cards));
 export const loadUnparsed = (root = process.cwd()) =>
   readJson<UnparsedMail>(file(root, FILES.unparsed));
