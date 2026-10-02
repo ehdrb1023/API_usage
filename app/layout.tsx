@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import TopNav from "@/components/TopNav";
+
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -11,7 +13,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        <TopNav />
+        {children}
+      </body>
     </html>
   );
 }

@@ -170,3 +170,28 @@ API 를 직접 붙이려면 Google Cloud 프로젝트 + OAuth 동의화면 + 리
 Deep Infra 처럼 사용량 API 가 없는 곳은 넣은 돈만 압니다. 이때도 `?` 입니다 —
 `spentByVendor` 에 **키를 아예 넣지 않는 것**으로 "모름" 을 표현합니다. 0 을 넣으면
 안 쓴 것처럼 보입니다.
+
+## 화면 — `/receipts` (2026-10-02)
+
+맨 위 탭 **결제 내역**. 로컬은 http://localhost:3000/receipts, 배포는 https://api.speciai.kr/receipts.
+
+- 출처 둘을 하나의 장부로 접는다 (`lib/billing/ledger.ts`)
+  - `receipts.json` — 파서가 읽은 것 (화면에 "자동")
+  - `manual-payments.json` — 양식이 제각각인 토스·Google·이니시스 등을 메일을 읽고 옮긴 것 ("수동", 원본 대조 권장)
+- 분류: **종류** (크레딧·정기결제·후불 사용료·일회성·환불·실패) × **결제 수단** × **분야**
+- 합계에서 빼야 하는 건(자사 테스트 결제·중복 의심 등)은 지우지 않고 `excludeReason` 을 단다.
+  화면의 "확인 필요" 에 이유와 함께 뜬다.
+
+### 배포본에 반영하기
+
+```bash
+node scripts/export_ledger.mjs   # data/billing → 비공개 Blob (billing/ledger-source.json)
+```
+
+수집 후 이걸 돌려야 api.speciai.kr 이 바뀐다. **git 으로는 절대 넘기지 않는다** — GitHub
+저장소가 공개라 커밋하면 결제 기록이 영구히 남는다. 배포본은 Blob 저장소
+`api-usage-billing`(비공개, 2026-10-02 생성)에서 읽는다 (`lib/billing/ledger-source.ts`).
+
+> ⚠️ **페이지 자체는 공개다** (2026-10-02 결정). api.speciai.kr 에 인증이 없어서 카드 끝자리·
+> 거래처·금액·실패 내역을 누구나 본다. 잠그려면 9/29 에 지운 접근 잠금
+> (`git show 6886a4c^:proxy.ts`)을 `/receipts` 에만 되살리면 된다.

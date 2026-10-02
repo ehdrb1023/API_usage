@@ -73,7 +73,7 @@ export default function Dashboard({
   }, [active, range, selectedKey]);
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+    <main className="mx-auto max-w-6xl px-4 pt-4 pb-8 sm:px-6 lg:px-8">
       <header className="mb-6">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">API 사용량</h1>
