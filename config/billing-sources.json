@@ -1,0 +1,46 @@
+{
+  "mailboxes": [
+    {
+      "address": "speciai250331@gmail.com",
+      "active": true,
+      "since": null,
+      "until": null,
+      "note": "2026-08-27 확인 — Anthropic·OpenAI·Stripe 영수증이 전부 여기로 온다."
+    }
+  ],
+
+  "vendorRules": [
+    {
+      "vendor": "Anthropic",
+      "senderPattern": "^invoice\\+statements@mail\\.anthropic\\.com$",
+      "template": "stripe-receipt",
+      "note": "구독(Max plan)과 API 사용분이 같은 주소로 온다. 구분은 품목명으로 한다."
+    },
+    {
+      "vendor": "Anthropic",
+      "senderPattern": "^billing@mail\\.anthropic\\.com$",
+      "template": "stripe-receipt",
+      "kind": "credit_note",
+      "note": "환불·크레딧노트."
+    },
+    {
+      "vendor": "Anthropic",
+      "senderPattern": "^failed-payments@mail\\.anthropic\\.com$",
+      "template": "anthropic-failed",
+      "kind": "failed",
+      "note": "결제 실패. 금액은 제목에 있다. 증빙이 아니라 경보용으로 남긴다."
+    },
+    {
+      "vendor": "OpenAI",
+      "senderPattern": "^noreply@tm\\.openai\\.com$",
+      "template": "openai-notice",
+      "note": "API 크레딧 충전·구독 개시. 카드 끝 4자리가 본문에 있다."
+    },
+    {
+      "vendor": null,
+      "senderPattern": "^invoice\\+statements(\\+acct_[A-Za-z0-9]+)?@stripe\\.com$",
+      "template": "stripe-receipt",
+      "note": "Stripe 를 쓰는 다른 업체 전부(Deep Infra·Meshy 등). 벤더 이름은 본문 'Receipt from X' 에서 읽는다 — 그래서 vendor 가 null 이다."
+    }
+  ]
+}
