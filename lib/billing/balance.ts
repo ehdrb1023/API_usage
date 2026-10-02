@@ -80,6 +80,8 @@ export function topupWindows(receipts: Receipt[]): TopupWindow[] {
 
   for (const r of receipts) {
     if (r.kind !== "prepaid_topup") continue;
+    // 쓴 돈(벤더 Admin API)이 달러라 원화 충전은 뺄 수가 없다. 섞지 않는다.
+    if (r.currency !== "USD") continue;
     const pocket = pocketOf(r.lineItem);
     const key = `${r.vendor}\t${pocket}`;
 

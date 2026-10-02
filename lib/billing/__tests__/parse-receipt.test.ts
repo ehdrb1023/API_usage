@@ -342,3 +342,51 @@ describe("자동 충전 품목", () => {
     assert.equal(classifyKind("Auto-recharge credits"), "prepaid_topup");
   });
 });
+
+// ── 원화 결제 (2026-10-02 실측) ───────────────────────────────────────────
+
+describe("원화 결제", () => {
+  it("Stripe 원화 영수증 — 소수점 없는 ₩ 금액을 읽는다 (Meshy)", () => {
+    const r = must(
+      parseMail(
+        mail({
+          sender: "invoice+statements+acct_1NSd1aK1QYbhGgDp@stripe.com",
+          subject: "Your receipt from Meshy #2157-2058",
+          date: "2026-09-08T01:47:51Z",
+          plaintextBody: "Meshy (https://www.meshy.ai/)\n\nMeshy\n\nReceipt from Meshy ₩58,000 Paid September 8, 2026 (invoice illustration [https://stripe-images.s3.amazonaws.com/emails/invoices_invoice_illustration.png]) Download invoice (https://pay.stripe.com/invoice/acct_1NSd1aK1QYbhGgDp/live_YWNjdF8xTlNkMWFLMVFZYmhHZ0RwLF9WRGVTM3pNMmF0Z0ljc0c4TlBENkpTdnlqYWREc0dNLDE3OTM3Mjg2Ng0200TL3ltcTS/pdf?s=em) Download receipt (https://dashboard.stripe.com/receipts/invoices/CAcQARoXChVhY2N0XzFOU2QxYUsxUVliaEdnRHAowtL91AYyBl0nmCpedzovFiD00gfo9jBgfc7F5McYBxQRD6HlMEH5LKCs3ZVm0LG84PYzj4jxEXGaJEhRPn0/pdf?s=em) Receipt number 2157-2058 Invoice number SCT2KF8V-0003 Payment method - 3039\n\nReceipt #2157-2058 Sep 8–Oct 8, 2026 Premium Qty 1 ₩58,000 Total ₩58,000 Amount paid ₩58,000 Manage your subscription (https://billing.stripe.com/p/login/cN28yU4SEfnb23e3cc) if you would like to update or cancel. Questions? Visit our support site (https://help.meshy.ai/en) or contact us at support@meshy.ai (support@meshy.ai).\n\nPowered by stripe logo (https://stripe.com)",
+        }),
+        CONFIG,
+      ),
+    );
+    assert.equal(r.vendor, "Meshy");
+    assert.equal(r.amount, 58000);
+    assert.equal(r.currency, "KRW");
+    assert.equal(r.paidOn, "2026-09-08");
+    assert.equal(r.cardLast4, "3039");
+    assert.equal(r.receiptNumber, "2157-2058");
+    // 품목이 "Premium" 뿐이지만 청구 기간이 있으니 구독이다.
+    assert.equal(r.kind, "subscription");
+  });
+
+  it("ChatGPT 구독 개시 메일 — 원화 구독료와 카드를 읽는다", () => {
+    const r = must(
+      parseMail(
+        mail({
+          sender: "noreply@tm.openai.com",
+          subject: "ChatGPT - Your new plan",
+          date: "2026-08-24T05:29:09Z",
+          plaintextBody: "              Manage your account:\nhttps://chatgpt.com/account/manage?account_id=9c24a0cc-3234-4db1-950a-24c574a33dda.\n<https://openai.com> You've successfully subscribed to ChatGPT Pro.\n\n  Your subscription will automatically renew monthly. You can cancel at any\ntime.\n\n         Manage your subscription\n<https://chatgpt.com/account/manage?account_id=9c24a0cc-3234-4db1-950a-24c574a33dda>\n       If you have any questions, please contact us through our help center\n<https://help.openai.com/en/>.\n\n  The OpenAI Team\n\n     Order number: sub_1U7qRMC6h1nxGoI3qVRsS7XA Order date: Aug 23,\n2026 Plan\n\n   Amount\n\n      ChatGPT Pro Subscription ₩144545 Tax: ₩0\nTotal: ₩144545 Payment method Mastercard-4411 By\nsubscribing, you authorize us to charge you the subscription cost (as\ndescribed above) automatically, charged to the payment method provided\nuntil canceled. Learn how to cancel\n<https://help.openai.com/en/articles/7232927-how-do-i-cancel-my-chatgpt-plus-or-chatgpt-pro-subscription>.\n\n  You may also request a refund subject to our Refund Policy\n<https://help.openai.com/articles/7232895-how-do-i-request-a-refund-for-my-chatgpt-subscription>.\n\n            OpenAI · 3180 18th St Ste 100 · San Francisco, CA 94110-2042\n· USA\n\n  You received this email because you have an account with OpenAI.",
+        }),
+        CONFIG,
+      ),
+    );
+    assert.equal(r.vendor, "OpenAI");
+    assert.equal(r.kind, "subscription");
+    assert.equal(r.amount, 144545);
+    assert.equal(r.currency, "KRW");
+    // 주문일이 메일 수신일(8/24 UTC)보다 우선한다.
+    assert.equal(r.paidOn, "2026-08-23");
+    assert.equal(r.cardLast4, "4411");
+    assert.equal(r.receiptNumber, "sub_1U7qRMC6h1nxGoI3qVRsS7XA");
+  });
+});

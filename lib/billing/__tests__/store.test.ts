@@ -163,6 +163,16 @@ describe("월별 집계 — 요금제 vs API", () => {
     assert.equal(anthropic.subscription + anthropic.apiUsage, 230);
   });
 
+  it("**달러와 원화를 한 줄에 더하지 않는다**", () => {
+    const r = monthlySummary([
+      receipt({ kind: "subscription", paidOn: "2026-09-08", amount: 20, receiptNumber: "u" }),
+      receipt({ kind: "subscription", paidOn: "2026-09-08", amount: 58000, currency: "KRW", receiptNumber: "k" }),
+    ]);
+    assert.equal(r.length, 2);
+    assert.equal(r.find((x) => x.currency === "USD")!.total, 20);
+    assert.equal(r.find((x) => x.currency === "KRW")!.total, 58000);
+  });
+
   it("최신 달이 위로 온다", () => {
     const r = monthlySummary([
       receipt({ paidOn: "2026-06-01", receiptNumber: "a" }),

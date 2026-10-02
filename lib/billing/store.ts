@@ -180,6 +180,8 @@ export async function mergeUnparsed(
 export type MonthlyRow = {
   month: string;
   vendor: string;
+  /** 통화가 다르면 다른 줄이다. 달러와 원화를 더하지 않는다. */
+  currency: string;
   /** 요금제. **쓰든 안 쓰든 나간 돈.** */
   subscription: number;
   /** API 후불. 쓴 만큼. */
@@ -199,8 +201,9 @@ export type MonthlyRow = {
   unknownCount: number;
 };
 
-const ZERO = (month: string, vendor: string): MonthlyRow => ({
+const ZERO = (month: string, vendor: string, currency: string): MonthlyRow => ({
   month,
+  currency,
   vendor,
   subscription: 0,
   apiUsage: 0,
@@ -224,10 +227,10 @@ export function monthlySummary(receipts: Receipt[]): MonthlyRow[] {
 
   for (const r of receipts) {
     const month = r.paidOn.slice(0, 7); // yyyy-mm
-    const key = `${month}\t${r.vendor}`;
+    const key = `${month}\t${r.vendor}\t${r.currency}`;
     let row = byKey.get(key);
     if (!row) {
-      row = ZERO(month, r.vendor);
+      row = ZERO(month, r.vendor, r.currency);
       byKey.set(key, row);
     }
 
@@ -255,18 +258,23 @@ export function monthlySummary(receipts: Receipt[]): MonthlyRow[] {
 export function byCard(
   receipts: Receipt[],
   cards: Card[],
-): { last4: string; label: string; total: number; count: number }[] {
+): { last4: string; label: string; currency: string; total: number; count: number }[] {
   const names = new Map(cards.map((c) => [c.last4, c.label]));
-  const out = new Map<string, { last4: string; label: string; total: number; count: number }>();
+  const out = new Map<
+    string,
+    { last4: string; label: string; currency: string; total: number; count: number }
+  >();
 
   for (const r of receipts) {
     if (r.kind === "failed" || r.kind === "unknown") continue;
     // 카드가 아닌 수단(Link 등)은 결제 수단 원문으로 묶는다.
     const last4 = r.cardLast4 ?? `(${r.paymentMethod ?? "미상"})`;
-    let row = out.get(last4);
+    // 같은 카드라도 통화가 다르면 따로 센다.
+    const key = `${last4}\t${r.currency}`;
+    let row = out.get(key);
     if (!row) {
-      row = { last4, label: names.get(last4) ?? last4, total: 0, count: 0 };
-      out.set(last4, row);
+      row = { last4, label: names.get(last4) ?? last4, currency: r.currency, total: 0, count: 0 };
+      out.set(key, row);
     }
     row.total += r.amount;
     row.count++;

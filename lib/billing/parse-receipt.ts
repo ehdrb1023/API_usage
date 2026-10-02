@@ -228,8 +228,10 @@ function parseStripeReceipt(mail: RawMail): Extracted | null {
    * 환불은 `Paid` 가 아니라 `Refunded on` 이고 동사도 다르다. 결제만 보면
    * 환불 메일이 통째로 "못 읽음" 으로 빠져 그 달 지출이 실제보다 많아 보인다.
    */
+  //   ⚠️ 원화 결제도 같은 머리글로 온다 (2026-10-02 실측, Meshy):
+  //   "Receipt from Meshy ₩58,000 Paid September 8, 2026" — 소수점이 없다.
   const head =
-    /(Receipt|Refund) from (.+?) \$([\d,]+\.\d{2}) (?:Paid|Refunded on) ([A-Z][a-z]+ \d{1,2}, \d{4})/.exec(
+    /(Receipt|Refund) from (.+?) (\$|₩)([\d,]+(?:\.\d{2})?) (?:Paid|Refunded on) ([A-Z][a-z]+ \d{1,2}, \d{4})/.exec(
       body,
     );
   if (!head) return null;
@@ -249,14 +251,21 @@ function parseStripeReceipt(mail: RawMail): Extracted | null {
 
   return {
     vendor: head[2].trim(),
-    paidOn: toIsoDate(head[4]),
+    paidOn: toIsoDate(head[5]),
     // 머리글 금액이 실제로 오간 돈이다. 아래 품목 줄에는 VAT 전 금액이 따로 있다
     // (실측: 환불 $1.50 은 "VAT - South Korea (10%)" 분이고 품목은 $15.00 이다).
-    amount: Number(head[3].replace(/,/g, "")),
-    currency: "USD",
+    amount: Number(head[4].replace(/,/g, "")),
+    currency: CURRENCY[head[3]],
     // 환불은 품목이 "Auto-recharge credits" 처럼 원래 결제 품목 그대로라
     // 품목만 보면 충전으로 잘못 잡힌다. 머리글이 이긴다.
-    kindHint: isRefund ? "credit_note" : undefined,
+    //
+    // 품목명으로 못 가르는데 청구 기간(Sep 8–Oct 8)이 붙어 있으면 구독이다.
+    // 실측: Meshy 는 품목이 "Premium" 한 단어뿐이다 (2026-10-02).
+    kindHint: isRefund
+      ? "credit_note"
+      : period && classifyKind(lineItem, mail.subject) === "unknown"
+        ? "subscription"
+        : undefined,
     receiptNumber,
     invoiceNumber,
     lineItem,
@@ -286,9 +295,9 @@ function parseOpenAiNotice(mail: RawMail): Extracted | null {
   const charged = /charged \$([\d,]+\.\d{2})/i.exec(body);
   const last4 = pick(body, /card ending in (\d{4})/i);
 
-  // 충전이 아닌 알림(구독 개시·로그인 등)은 금액이 없다. 금액이 없으면
-  // 증빙이 아니므로 여기서 끊는다 — 0원짜리 영수증을 만들지 않는다.
-  if (!charged) return null;
+  // 충전이 아니면 ChatGPT 구독 개시 메일인지 본다. 로그인 알림 등은 금액이 없다.
+  // 금액이 없으면 증빙이 아니므로 끊는다 — 0원짜리 영수증을 만들지 않는다.
+  if (!charged) return parseChatGptPlan(mail, body);
 
   return {
     vendor: "OpenAI",
@@ -302,6 +311,38 @@ function parseOpenAiNotice(mail: RawMail): Extracted | null {
     periodEnd: null,
     cardLast4: last4,
     paymentMethod: last4 ? `credit card ending in ${last4}` : null,
+    subjectHint: mail.subject,
+  };
+}
+
+/**
+ * ChatGPT 구독 개시 — 원화로 결제된다 (2026-10-02 실측).
+ *
+ *   Order number: sub_1U7q… Order date: Aug 23, 2026 Plan Amount
+ *   ChatGPT Pro Subscription ₩144545 Tax: ₩0 Total: ₩144545
+ *   Payment method Mastercard-4411
+ *
+ * ⚠️ 이 메일은 **처음 가입할 때만** 온다. 매달 갱신분은 메일이 없어서 여기로는
+ *    한 번만 잡힌다. 월별 구독료를 맞추려면 ChatGPT 결제 내역을 따로 봐야 한다.
+ */
+function parseChatGptPlan(mail: RawMail, body: string): Extracted | null {
+  const total = /Total: ₩([\d,]+)/.exec(body);
+  const plan = pick(body, /(ChatGPT \w+ Subscription)/);
+  if (!total || !plan) return null;
+
+  const paymentMethod = pick(body, /Payment method (\S+-\d{4})/);
+  return {
+    vendor: "OpenAI",
+    paidOn: toIsoDate(pick(body, /Order date: ([A-Za-z]+ \d{1,2}, \d{4})/) ?? "") ?? mail.date.slice(0, 10),
+    amount: Number(total[1].replace(/,/g, "")),
+    currency: "KRW",
+    receiptNumber: pick(body, /Order number: (\S+)/),
+    invoiceNumber: null,
+    lineItem: plan,
+    periodStart: null,
+    periodEnd: null,
+    cardLast4: paymentMethod ? pick(paymentMethod, /(\d{4})$/) : null,
+    paymentMethod,
     subjectHint: mail.subject,
   };
 }
@@ -338,6 +379,8 @@ function parseAnthropicFailed(mail: RawMail): Extracted | null {
 function normalize(body: string): string {
   return body.replace(/[|\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
 }
+
+const CURRENCY: Record<string, string> = { $: "USD", "₩": "KRW" };
 
 function pick(text: string, re: RegExp): string | null {
   const m = re.exec(text);

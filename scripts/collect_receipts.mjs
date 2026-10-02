@@ -142,11 +142,14 @@ console.log(`\n${"─".repeat(72)}`);
 console.log("월별 — 요금제 vs API\n");
 const rows = monthlySummary(receipts);
 const f = (n) => (n === 0 ? "     ·  " : n.toFixed(2).padStart(8));
-console.log("  월       벤더            요금제      API후불    선불충전      환불       합계");
-console.log("  " + "─".repeat(70));
+// 달러와 원화는 같은 칸에서 더하지 않는다. 줄마다 통화를 붙인다.
+const cur = (c) => (c === "USD" ? "$" : c === "KRW" ? "₩" : c);
+const money = (c, n) => `${cur(c)}${c === "KRW" ? Math.round(n).toLocaleString("en-US") : n.toFixed(2)}`;
+console.log("  월       벤더            통화  요금제      API후불    선불충전      환불       합계");
+console.log("  " + "─".repeat(76));
 for (const r of rows) {
   console.log(
-    `  ${r.month}  ${r.vendor.slice(0, 14).padEnd(14)} ${f(r.subscription)} ${f(r.apiUsage)} ` +
+    `  ${r.month}  ${r.vendor.slice(0, 14).padEnd(14)} ${r.currency} ${f(r.subscription)} ${f(r.apiUsage)} ` +
       `${f(r.prepaidTopup)} ${f(r.creditNote)} ${f(r.total)}` +
       (r.unknownCount ? `  ⚠️미분류${r.unknownCount}` : "") +
       (r.failedCount ? `  실패${r.failedCount}` : ""),
@@ -250,5 +253,5 @@ if (windows.length) {
 
 console.log(`\n카드별\n`);
 for (const c of byCard(receipts, cards)) {
-  console.log(`  ${c.label.padEnd(20)} $${c.total.toFixed(2).padStart(9)}  (${c.count}건)`);
+  console.log(`  ${c.label.padEnd(20)} ${money(c.currency, c.total).padStart(11)}  (${c.count}건)`);
 }
