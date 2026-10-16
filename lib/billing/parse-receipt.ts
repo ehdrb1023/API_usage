@@ -165,7 +165,7 @@ export function classifyKind(lineItem: string | null, subject?: string): ChargeK
    *    "API credit top-up"                    $10   OpenAI 충전
    */
   if (
-    /prepay|prepaid|top-?up|funded|credit balance|credit purchase|recharge|재충전|충전/.test(
+    /prepay|prepaid|top-?up|funded|credit balance|credit purchase|\bcredits?\b|recharge|재충전|충전/.test(
       text,
     )
   ) {
@@ -231,17 +231,27 @@ function parseStripeReceipt(mail: RawMail): Extracted | null {
   //   ⚠️ 원화 결제도 같은 머리글로 온다 (2026-10-02 실측, Meshy):
   //   "Receipt from Meshy ₩58,000 Paid September 8, 2026" — 소수점이 없다.
   const head =
-    /(Receipt|Refund) from (.+?) (\$|₩)([\d,]+(?:\.\d{2})?) (?:Paid|Refunded on) ([A-Z][a-z]+ \d{1,2}, \d{4})/.exec(
+    /(Receipt|Refund) from (.+?) (\$|₩)([\d,]+(?:\.\d{2})?) (?:Paid(?: on)?|Refunded on) ([A-Z][a-z]+ \d{1,2}, \d{4})/.exec(
       body,
     );
   if (!head) return null;
 
   const isRefund = head[1] === "Refund";
 
-  const receiptNumber = pick(body, /Receipt number ([A-Za-z0-9-]+)/);
-  const invoiceNumber = pick(body, /Invoice number ([A-Za-z0-9-]+)/);
+  // Stripe 신규 형식(2026-10 실측)은 `Receipt number`/`Invoice number` 줄을
+  // 없애고 `Receipt #...` 및 첨부 파일명에만 번호를 남긴다.
+  const receiptNumber =
+    pick(body, /Receipt number ([A-Za-z0-9-]+)/) ??
+    pick(body, /Receipt #([A-Za-z0-9-]+)/) ??
+    pick(mail.subject, /#([A-Za-z0-9-]+)/);
+  const invoiceNumber =
+    pick(body, /Invoice number ([A-Za-z0-9-]+)/) ??
+    attachmentNumber(mail.attachments, "Invoice");
   // 환불 메일은 "Payment method" 대신 "Refunded to" 로 온다.
-  const paymentMethod = pick(body, /(?:Payment method|Refunded to) (.+?)(?: Receipt #|$)/);
+  // 신규 결제 형식은 머리글에 `Paid on ... with - 4411` 로 표시한다.
+  const paymentMethod =
+    pick(body, /(?:Payment method|Refunded to) (.+?)(?: Receipt #|$)/) ??
+    pick(body, /Paid(?: on)? [A-Z][a-z]+ \d{1,2}, \d{4} with (.+?) \(invoice illustration/);
 
   // 품목 줄: "Receipt #<번호> [기간] <품목> Qty <n> $<금액>"
   //   기간은 구독에만 있다 (Deep Infra 선불에는 없다).
@@ -385,6 +395,17 @@ const CURRENCY: Record<string, string> = { $: "USD", "₩": "KRW" };
 function pick(text: string, re: RegExp): string | null {
   const m = re.exec(text);
   return m ? m[1].trim() : null;
+}
+
+function attachmentNumber(
+  attachments: string[] | undefined,
+  prefix: string,
+): string | null {
+  for (const filename of attachments ?? []) {
+    const m = new RegExp(`^${prefix}-(.+)\\.pdf$`, "i").exec(filename);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 const MONTHS: Record<string, string> = {

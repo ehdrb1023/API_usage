@@ -81,6 +81,17 @@ Receipt #2978-7957 Prepayment Qty 1 $5.00 Total $5.00 Amount paid $5.00 Question
 
 Powered by stripe logo (https://stripe.com)`;
 
+/** 2026-10-15 X Developer Platform — Stripe 신규 형식. */
+const X_CREDITS = `X Developer Platform  (http://developer.x.com)
+
+X Developer Platform
+
+Receipt from X Developer Platform $5.00 Paid on October 15, 2026 with - 4411 (invoice illustration [https://stripe-images.s3.amazonaws.com/emails/invoices_invoice_illustration.png])
+
+Receipt #2222-8587 Credits Qty 1 $5.00 Total $5.00 Amount paid $5.00 Charged ₩7,026 using 1 USD = 1,405.2592 KRW
+
+Powered by stripe logo (https://stripe.com)`;
+
 /** 2026-08-13 OpenAI — API 크레딧 충전. 영수증 번호가 없다. */
 const OPENAI_TOPUP = ` Your OpenAI API account has been funded
 
@@ -190,6 +201,34 @@ describe("Stripe 영수증 — Deep Infra (재판매사)", () => {
   it("기간이 없는 영수증은 기간이 null 이다", () => {
     assert.equal(r.periodStart, null);
     assert.equal(r.periodEnd, null);
+  });
+});
+
+describe("Stripe 영수증 — 신규 형식", () => {
+  const r = must(
+    parseMail(
+      mail({
+        sender: "invoice+statements+acct_1S46seBJoSOSGwEl@stripe.com",
+        subject: "Your receipt from X Developer Platform #2222-8587",
+        date: "2026-10-15T02:28:39Z",
+        plaintextBody: X_CREDITS,
+        attachments: ["Invoice-8C7VFE7N-0001.pdf", "Receipt-2222-8587.pdf"],
+      }),
+      CONFIG,
+    ),
+  );
+
+  it("Paid on 머리글과 번호·카드를 읽는다", () => {
+    assert.equal(r.vendor, "X Developer Platform");
+    assert.equal(r.paidOn, "2026-10-15");
+    assert.equal(r.receiptNumber, "2222-8587");
+    assert.equal(r.invoiceNumber, "8C7VFE7N-0001");
+    assert.equal(r.cardLast4, "4411");
+  });
+
+  it("Credits 품목을 선불 크레딧으로 분류한다", () => {
+    assert.equal(r.kind, "prepaid_topup");
+    assert.equal(r.lineItem, "Credits");
   });
 });
 
