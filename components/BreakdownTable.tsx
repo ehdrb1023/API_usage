@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import type { BreakdownRow } from "@/lib/analytics";
 import { RANGES } from "@/lib/analytics";
@@ -61,6 +61,8 @@ export default function BreakdownTable({
   const selectable = typeof onSelect === "function";
   const withLocations = !!locations;
   const withMemos = typeof onSaveMemo === "function";
+  const columnCount =
+    3 + (withLocations ? 1 : 0) + series.metricSpecs.length;
 
   /** 같은 행을 다시 누르면 해제. */
   const toggle = (key: string) => onSelect?.(selectedKey === key ? null : key);
@@ -71,12 +73,15 @@ export default function BreakdownTable({
         <h2 className="text-sm font-semibold">{axis}별 사용량</h2>
         <p className="text-xs" style={{ color: "var(--text-muted)" }}>
           {rangeLabel} 합계
-          {selectable && " · 행을 클릭하면 그 키만 차트로"}
+          {selectable &&
+            (withMemos
+              ? " · 행을 클릭하면 차트와 메모가 펼쳐집니다"
+              : " · 행을 클릭하면 그 키만 차트로")}
         </p>
       </div>
 
       <div className="-mx-4 overflow-x-auto sm:mx-0">
-        <table className={`w-full text-sm ${withMemos ? "min-w-[900px]" : "min-w-[640px]"}`}>
+        <table className="w-full min-w-[640px] text-sm">
           <thead>
             <tr
               className="text-left text-xs"
@@ -88,11 +93,6 @@ export default function BreakdownTable({
               {withLocations && (
                 <th scope="col" className="px-2 py-2 font-medium">
                   사용처
-                </th>
-              )}
-              {withMemos && (
-                <th scope="col" className="min-w-64 px-2 py-2 font-medium">
-                  메모
                 </th>
               )}
               <th scope="col" className="px-2 py-2 text-right font-medium">
@@ -112,118 +112,142 @@ export default function BreakdownTable({
             {rows.map((row, i) => {
               const selected = selectable && selectedKey === row.key;
               return (
-              <tr
-                key={row.key}
-                className={`border-t${selectable ? " cursor-pointer" : ""}`}
-                onClick={selectable ? () => toggle(row.key) : undefined}
-                style={{
-                  borderColor: "var(--border)",
-                  background: selected
-                    ? "color-mix(in srgb, var(--series-1) 14%, transparent)"
-                    : undefined,
-                }}
-              >
-                <th scope="row" className="px-4 py-2.5 text-left font-normal sm:px-2">
-                  <span className="flex items-center gap-2">
-                    {onToggleFavorite && (
-                      <StarButton
-                        on={favoriteIds.includes(row.key)}
-                        label={row.label}
-                        onClick={() => onToggleFavorite(row.key)}
-                      />
-                    )}
-                    <span
-                      aria-hidden="true"
-                      className="inline-block size-2 shrink-0 rounded-full"
-                      style={{ background: slotColor(i) }}
-                    />
-                    {/*
-                      키보드 접근 경로. 행 전체에도 onClick 이 있어서 마우스는 어디를 눌러도
-                      되지만, 클릭이 두 번 세어지지 않도록 여기서 전파를 끊는다.
-                      title 에는 전체 api_key_id — config/client-keys.json 에 옮겨 적을 때 쓴다.
-                    */}
-                    {selectable ? (
-                      <button
-                        type="button"
-                        className="truncate text-left"
-                        style={{ fontWeight: selected ? 600 : undefined }}
-                        title={row.title}
-                        aria-pressed={selected}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggle(row.key);
-                        }}
-                      >
-                        {row.label}
-                      </button>
-                    ) : (
-                      <span className="truncate" title={row.title}>
-                        {row.label}
-                      </span>
-                    )}
-                    {row.badge && (
-                      <span
-                        className="shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none"
-                        style={{
-                          border: "1px solid var(--border)",
-                          color: "var(--text-muted)",
-                        }}
-                      >
-                        {row.badge}
-                      </span>
-                    )}
-                    {row.hint && (
-                      // 이름을 못 찾았거나 같은 이름의 키가 여럿일 때만 붙는다.
-                      <span
-                        className="shrink-0 truncate text-[11px]"
-                        style={{ color: "var(--text-muted)" }}
-                        title={row.hint}
-                      >
-                        {row.hint}
-                      </span>
-                    )}
-                  </span>
-                </th>
-                {withLocations && (
-                  <td className="px-2 py-2.5 align-top">
-                    <LocationCell result={locations.byKey[row.key]} />
-                  </td>
-                )}
-                {withMemos && (
-                  <td className="min-w-64 px-2 py-2 align-top">
-                    <KeyMemoCell
-                      label={row.label}
-                      memo={memos[row.key] ?? ""}
-                      onSave={(memo) => onSaveMemo?.(row.key, memo)}
-                    />
-                  </td>
-                )}
-                <td className="tabular px-2 py-2.5 text-right font-medium">
-                  {formatUsd(row.costUsd)}
-                </td>
-                <td
-                  className="tabular px-2 py-2.5 text-right"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  {(row.costShare * 100).toFixed(1)}%
-                </td>
-                {series.metricSpecs.map((m) => (
-                  <td
-                    key={m.key}
-                    className="tabular px-2 py-2.5 text-right"
-                    style={{ color: "var(--text-secondary)" }}
+                <Fragment key={row.key}>
+                  <tr
+                    className={`border-t${selectable ? " cursor-pointer" : ""}`}
+                    onClick={selectable ? () => toggle(row.key) : undefined}
+                    style={{
+                      borderColor: "var(--border)",
+                      background: selected
+                        ? "color-mix(in srgb, var(--series-1) 14%, transparent)"
+                        : undefined,
+                    }}
                   >
-                    {formatMetric(row.metrics[m.key] ?? 0, m)}
-                  </td>
-                ))}
-              </tr>
+                    <th scope="row" className="px-4 py-2.5 text-left font-normal sm:px-2">
+                      <span className="flex items-center gap-2">
+                        {onToggleFavorite && (
+                          <StarButton
+                            on={favoriteIds.includes(row.key)}
+                            label={row.label}
+                            onClick={() => onToggleFavorite(row.key)}
+                          />
+                        )}
+                        {withMemos && (
+                          <span
+                            aria-hidden="true"
+                            className="w-3 shrink-0 text-xs"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            {selected ? "▾" : "›"}
+                          </span>
+                        )}
+                        <span
+                          aria-hidden="true"
+                          className="inline-block size-2 shrink-0 rounded-full"
+                          style={{ background: slotColor(i) }}
+                        />
+                        {/*
+                          키보드 접근 경로. 행 전체에도 onClick 이 있어서 마우스는 어디를 눌러도
+                          되지만, 클릭이 두 번 세어지지 않도록 여기서 전파를 끊는다.
+                          title 에는 전체 api_key_id — config/client-keys.json 에 옮겨 적을 때 쓴다.
+                        */}
+                        {selectable ? (
+                          <button
+                            type="button"
+                            className="truncate text-left"
+                            style={{ fontWeight: selected ? 600 : undefined }}
+                            title={row.title}
+                            aria-expanded={withMemos ? selected : undefined}
+                            aria-pressed={selected}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              toggle(row.key);
+                            }}
+                          >
+                            {row.label}
+                          </button>
+                        ) : (
+                          <span className="truncate" title={row.title}>
+                            {row.label}
+                          </span>
+                        )}
+                        {memos[row.key] && (
+                          <span
+                            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none"
+                            style={{
+                              border: "1px solid var(--border)",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            메모 있음
+                          </span>
+                        )}
+                        {row.badge && (
+                          <span
+                            className="shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none"
+                            style={{
+                              border: "1px solid var(--border)",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {row.badge}
+                          </span>
+                        )}
+                        {row.hint && (
+                          <span
+                            className="shrink-0 truncate text-[11px]"
+                            style={{ color: "var(--text-muted)" }}
+                            title={row.hint}
+                          >
+                            {row.hint}
+                          </span>
+                        )}
+                      </span>
+                    </th>
+                    {withLocations && (
+                      <td className="px-2 py-2.5 align-top">
+                        <LocationCell result={locations.byKey[row.key]} />
+                      </td>
+                    )}
+                    <td className="tabular px-2 py-2.5 text-right font-medium">
+                      {formatUsd(row.costUsd)}
+                    </td>
+                    <td
+                      className="tabular px-2 py-2.5 text-right"
+                      style={{ color: "var(--text-secondary)" }}
+                    >
+                      {(row.costShare * 100).toFixed(1)}%
+                    </td>
+                    {series.metricSpecs.map((m) => (
+                      <td
+                        key={m.key}
+                        className="tabular px-2 py-2.5 text-right"
+                        style={{ color: "var(--text-secondary)" }}
+                      >
+                        {formatMetric(row.metrics[m.key] ?? 0, m)}
+                      </td>
+                    ))}
+                  </tr>
+                  {withMemos && selected && (
+                    <tr style={{ background: "var(--hover)" }}>
+                      <td colSpan={columnCount} className="px-4 py-3 sm:px-6">
+                        <KeyMemoPanel
+                          label={row.label}
+                          memo={memos[row.key] ?? ""}
+                          onClose={() => onSelect?.(null)}
+                          onSave={(memo) => onSaveMemo?.(row.key, memo)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
 
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + (withLocations ? 1 : 0) + (withMemos ? 1 : 0) + series.metricSpecs.length}
+                  colSpan={columnCount}
                   className="px-2 py-8 text-center text-sm"
                   style={{ color: "var(--text-muted)" }}
                 >
@@ -242,7 +266,6 @@ export default function BreakdownTable({
                   합계
                 </th>
                 {withLocations && <td />}
-                {withMemos && <td />}
                 <td className="tabular px-2 py-2.5 text-right font-semibold">
                   {formatUsd(total)}
                 </td>
@@ -282,7 +305,7 @@ export default function BreakdownTable({
 
       {withMemos && (
         <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
-          메모는 이 브라우저에만 저장됩니다. 메모를 누르면 수정할 수 있고, 내용을 비워
+          키 행을 누르면 메모가 펼쳐집니다. 메모는 이 브라우저에만 저장되며, 내용을 비워
           저장하면 삭제됩니다.
         </p>
       )}
@@ -296,59 +319,49 @@ export default function BreakdownTable({
   );
 }
 
-function KeyMemoCell({
+function KeyMemoPanel({
   label,
   memo,
+  onClose,
   onSave,
 }: {
   label: string;
   memo: string;
+  onClose: () => void;
   onSave: (memo: string) => void;
 }) {
-  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(memo);
 
-  const start = () => {
-    setDraft(memo);
-    setEditing(true);
-  };
   const save = () => {
     onSave(draft);
-    setEditing(false);
   };
 
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        className="block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-[var(--hover)]"
-        style={{ color: memo ? "var(--text-secondary)" : "var(--text-muted)" }}
-        title={memo || `${label} 메모 추가`}
-        onClick={(event) => {
-          event.stopPropagation();
-          start();
-        }}
-      >
-        <span className={memo ? "line-clamp-3 whitespace-pre-line" : ""}>
-          {memo || "+ 메모 추가"}
-        </span>
-      </button>
-    );
-  }
-
   return (
-    <div
-      className="flex flex-col gap-1.5"
-      onClick={(event) => event.stopPropagation()}
-    >
+    <div className="mx-auto max-w-3xl" onClick={(event) => event.stopPropagation()}>
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold">키 메모</p>
+          <p className="mt-0.5 text-[11px]" style={{ color: "var(--text-muted)" }}>
+            {label}의 사용 위치, 환경변수명, 용도를 적어 두세요.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="shrink-0 rounded px-2 py-1 text-xs"
+          style={{ color: "var(--text-secondary)" }}
+          onClick={onClose}
+        >
+          접기
+        </button>
+      </div>
       <textarea
         autoFocus
-        rows={3}
+        rows={4}
         maxLength={500}
         value={draft}
         aria-label={`${label} 메모`}
         placeholder="예: linktalk 운영 서버의 ANTHROPIC_API_KEY, 상담 답변 생성용"
-        className="w-full resize-y rounded-md border px-2 py-1.5 text-xs outline-none focus:ring-2"
+        className="w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2"
         style={{
           borderColor: "var(--border)",
           background: "var(--page)",
@@ -357,32 +370,22 @@ function KeyMemoCell({
         }}
         onChange={(event) => setDraft(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Escape") setEditing(false);
+          if (event.key === "Escape") onClose();
           if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) save();
         }}
       />
-      <div className="flex items-center justify-between gap-2">
+      <div className="mt-1.5 flex items-center justify-between gap-2">
         <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
           {draft.length}/500 · Ctrl/⌘+Enter 저장
         </span>
-        <span className="flex gap-1">
-          <button
-            type="button"
-            className="rounded px-2 py-1 text-[11px]"
-            style={{ color: "var(--text-secondary)" }}
-            onClick={() => setEditing(false)}
-          >
-            취소
-          </button>
-          <button
-            type="button"
-            className="rounded px-2 py-1 text-[11px] font-medium text-white"
-            style={{ background: "var(--series-1)" }}
-            onClick={save}
-          >
-            저장
-          </button>
-        </span>
+        <button
+          type="button"
+          className="rounded-md px-3 py-1.5 text-xs font-medium text-white"
+          style={{ background: "var(--series-1)" }}
+          onClick={save}
+        >
+          저장
+        </button>
       </div>
     </div>
   );
