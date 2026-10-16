@@ -14,6 +14,7 @@ type Props = {
   /** 보조 축(키별) 집계 — 이미 비용 내림차순이다. */
   rows: BreakdownRow[];
   favoriteIds: string[];
+  memos: Record<string, string>;
   locations?: KeyLocationsView;
   selectedKey: string | null;
   onToggleFavorite: (keyId: string) => void;
@@ -31,6 +32,7 @@ export default function FavoriteKeys({
   range,
   rows,
   favoriteIds,
+  memos,
   locations,
   selectedKey,
   onToggleFavorite,
@@ -86,6 +88,7 @@ export default function FavoriteKeys({
             const where = locations?.byKey[row.key]?.locations[0];
             const favored = favoriteIds.includes(row.key);
             const selected = selectedKey === row.key;
+            const memo = memos[row.key];
             return (
               <article
                 key={row.key}
@@ -111,6 +114,15 @@ export default function FavoriteKeys({
                     {(row.costShare * 100).toFixed(1)}%
                   </span>
                 </p>
+                {memo && (
+                  <p
+                    className="mt-1 line-clamp-2 text-xs"
+                    style={{ color: "var(--text-secondary)" }}
+                    title={memo}
+                  >
+                    {memo}
+                  </p>
+                )}
                 <Sparkline values={daily} />
                 <dl className="mt-2 grid grid-cols-2 gap-x-2 text-xs" style={{ color: "var(--text-secondary)" }}>
                   <dt style={{ color: "var(--text-muted)" }}>{primary?.label ?? "사용량"}</dt>

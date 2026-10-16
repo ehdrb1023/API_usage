@@ -22,6 +22,7 @@ import {
 } from "@/lib/analytics";
 import { useFavorites } from "@/lib/favorites";
 import { formatDateLong } from "@/lib/format";
+import { useKeyMemos } from "@/lib/key-memos";
 import type { RangeId, ServiceId, ServiceSeries } from "@/lib/types";
 
 type Props = {
@@ -41,6 +42,7 @@ export default function Dashboard({
   /** 서비스별 표에서 선택한 API 키. null 이면 전체 합계를 본다. */
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const { favorites, toggle: toggleFavorite } = useFavorites();
+  const { memos, save: saveKeyMemo } = useKeyMemos();
   const active = series.find((s) => s.service === service) ?? series[0];
 
   const view = useMemo(() => {
@@ -174,6 +176,7 @@ export default function Dashboard({
           range={range}
           rows={view.altBreakdown}
           favoriteIds={favorites[active.service] ?? []}
+          memos={memos[active.service] ?? {}}
           locations={active.keyLocations}
           selectedKey={view.focusKey}
           onToggleFavorite={(keyId) => toggleFavorite(active.service, keyId)}
@@ -215,6 +218,8 @@ export default function Dashboard({
             locations={active.keyLocations}
             favoriteIds={favorites[active.service] ?? []}
             onToggleFavorite={(keyId) => toggleFavorite(active.service, keyId)}
+            memos={memos[active.service] ?? {}}
+            onSaveMemo={(keyId, memo) => saveKeyMemo(active.service, keyId, memo)}
           />
         </div>
       )}

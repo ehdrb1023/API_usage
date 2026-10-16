@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import type { BreakdownRow } from "@/lib/analytics";
 import { RANGES } from "@/lib/analytics";
 import { StarButton } from "@/components/FavoriteKeys";
@@ -27,6 +29,9 @@ type Props = {
   /** 넘기면 이름 앞에 ☆ 가 생긴다. 키별 표에만 쓴다. */
   favoriteIds?: string[];
   onToggleFavorite?: (key: string) => void;
+  /** 키별 개인 메모. 넘기면 표 안에서 작성·수정할 수 있다. */
+  memos?: Record<string, string>;
+  onSaveMemo?: (key: string, memo: string) => void;
 };
 
 /**
@@ -47,12 +52,15 @@ export default function BreakdownTable({
   locations,
   favoriteIds = [],
   onToggleFavorite,
+  memos = {},
+  onSaveMemo,
 }: Props) {
   const rangeLabel = RANGES.find((r) => r.id === range)?.label ?? "";
   const axis = axisLabel ?? series.breakdownLabel;
   const total = rows.reduce((s, r) => s + r.costUsd, 0);
   const selectable = typeof onSelect === "function";
   const withLocations = !!locations;
+  const withMemos = typeof onSaveMemo === "function";
 
   /** 같은 행을 다시 누르면 해제. */
   const toggle = (key: string) => onSelect?.(selectedKey === key ? null : key);
@@ -68,7 +76,7 @@ export default function BreakdownTable({
       </div>
 
       <div className="-mx-4 overflow-x-auto sm:mx-0">
-        <table className="w-full min-w-[640px] text-sm">
+        <table className={`w-full text-sm ${withMemos ? "min-w-[900px]" : "min-w-[640px]"}`}>
           <thead>
             <tr
               className="text-left text-xs"
@@ -80,6 +88,11 @@ export default function BreakdownTable({
               {withLocations && (
                 <th scope="col" className="px-2 py-2 font-medium">
                   사용처
+                </th>
+              )}
+              {withMemos && (
+                <th scope="col" className="min-w-64 px-2 py-2 font-medium">
+                  메모
                 </th>
               )}
               <th scope="col" className="px-2 py-2 text-right font-medium">
@@ -176,6 +189,15 @@ export default function BreakdownTable({
                     <LocationCell result={locations.byKey[row.key]} />
                   </td>
                 )}
+                {withMemos && (
+                  <td className="min-w-64 px-2 py-2 align-top">
+                    <KeyMemoCell
+                      label={row.label}
+                      memo={memos[row.key] ?? ""}
+                      onSave={(memo) => onSaveMemo?.(row.key, memo)}
+                    />
+                  </td>
+                )}
                 <td className="tabular px-2 py-2.5 text-right font-medium">
                   {formatUsd(row.costUsd)}
                 </td>
@@ -201,7 +223,7 @@ export default function BreakdownTable({
             {rows.length === 0 && (
               <tr>
                 <td
-                  colSpan={3 + (withLocations ? 1 : 0) + series.metricSpecs.length}
+                  colSpan={3 + (withLocations ? 1 : 0) + (withMemos ? 1 : 0) + series.metricSpecs.length}
                   className="px-2 py-8 text-center text-sm"
                   style={{ color: "var(--text-muted)" }}
                 >
@@ -220,6 +242,7 @@ export default function BreakdownTable({
                   합계
                 </th>
                 {withLocations && <td />}
+                {withMemos && <td />}
                 <td className="tabular px-2 py-2.5 text-right font-semibold">
                   {formatUsd(total)}
                 </td>
@@ -257,12 +280,111 @@ export default function BreakdownTable({
         </p>
       )}
 
+      {withMemos && (
+        <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
+          메모는 이 브라우저에만 저장됩니다. 메모를 누르면 수정할 수 있고, 내용을 비워
+          저장하면 삭제됩니다.
+        </p>
+      )}
+
       {note && (
         <p className="mt-3 text-xs" style={{ color: "var(--text-muted)" }}>
           {note}
         </p>
       )}
     </section>
+  );
+}
+
+function KeyMemoCell({
+  label,
+  memo,
+  onSave,
+}: {
+  label: string;
+  memo: string;
+  onSave: (memo: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(memo);
+
+  const start = () => {
+    setDraft(memo);
+    setEditing(true);
+  };
+  const save = () => {
+    onSave(draft);
+    setEditing(false);
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="block w-full rounded-md px-2 py-1.5 text-left text-xs hover:bg-[var(--hover)]"
+        style={{ color: memo ? "var(--text-secondary)" : "var(--text-muted)" }}
+        title={memo || `${label} 메모 추가`}
+        onClick={(event) => {
+          event.stopPropagation();
+          start();
+        }}
+      >
+        <span className={memo ? "line-clamp-3 whitespace-pre-line" : ""}>
+          {memo || "+ 메모 추가"}
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <div
+      className="flex flex-col gap-1.5"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <textarea
+        autoFocus
+        rows={3}
+        maxLength={500}
+        value={draft}
+        aria-label={`${label} 메모`}
+        placeholder="예: linktalk 운영 서버의 ANTHROPIC_API_KEY, 상담 답변 생성용"
+        className="w-full resize-y rounded-md border px-2 py-1.5 text-xs outline-none focus:ring-2"
+        style={{
+          borderColor: "var(--border)",
+          background: "var(--page)",
+          color: "var(--text-primary)",
+          outlineColor: "var(--series-1)",
+        }}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setEditing(false);
+          if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) save();
+        }}
+      />
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
+          {draft.length}/500 · Ctrl/⌘+Enter 저장
+        </span>
+        <span className="flex gap-1">
+          <button
+            type="button"
+            className="rounded px-2 py-1 text-[11px]"
+            style={{ color: "var(--text-secondary)" }}
+            onClick={() => setEditing(false)}
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            className="rounded px-2 py-1 text-[11px] font-medium text-white"
+            style={{ background: "var(--series-1)" }}
+            onClick={save}
+          >
+            저장
+          </button>
+        </span>
+      </div>
+    </div>
   );
 }
 
