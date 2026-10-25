@@ -1,4 +1,6 @@
+import BudgetCards from "@/components/BudgetCards";
 import Dashboard from "@/components/Dashboard";
+import { getBudgetCards, type BudgetCard } from "@/lib/budget";
 import { getAllSeries, getDataSourceMode } from "@/lib/data-source";
 
 /**
@@ -35,5 +37,22 @@ export default async function Page() {
     );
   }
 
-  return <Dashboard series={series} mode={mode} />;
+  // 예산·잔액 카드는 추가 층이다 — 실패해도 사용량 대시보드는 그대로 보여준다.
+  let budgetCards: BudgetCard[] = [];
+  try {
+    budgetCards = await getBudgetCards();
+  } catch (err) {
+    console.warn("[page] 예산 카드 조회 실패 — 사용량 대시보드만 표시합니다.", err);
+  }
+
+  return (
+    <>
+      {budgetCards.length > 0 && (
+        <div className="mx-auto max-w-6xl px-4 pt-4 sm:px-6 lg:px-8">
+          <BudgetCards cards={budgetCards} />
+        </div>
+      )}
+      <Dashboard series={series} mode={mode} />
+    </>
+  );
 }
